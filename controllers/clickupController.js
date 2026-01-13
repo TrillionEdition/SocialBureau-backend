@@ -6,6 +6,11 @@ const { default: axios } = require("axios");
 const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 const TEAM_ID = "9014733918";
 
+// Escape user input for safe usage in RegExp
+function escapeRegex(text) {
+  return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 const clickupController = {
   getTime: expressAsyncHandler(async (req, res) => {
     try {
@@ -58,13 +63,17 @@ const clickupController = {
   getUserDetails: expressAsyncHandler(async (req, res) => {
     try {
       const userName = req.query.name
+      console.log("Fetching details for user:", userName);
       if (!userName) {
         return res.status(400).json({ message: "User name not provided" });
       }
       const includeSensitive =
         String(req.query.includeSensitive).toLowerCase() === "true";
-      const query = User.findOne(
-        { name: userName },
+      // Use a case-insensitive exact-name match after trimming input
+      const nameFilter = { name: { $regex: `^${escapeRegex(String(userName).trim())}$`, $options: "i" } };
+
+      let query = User.findOne(
+        nameFilter,
         "name dp clickupId rating doj rate coverImage idCard tools role email clients"
       )
       .populate([

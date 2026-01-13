@@ -33,7 +33,6 @@ const { sendLatestBlogNewsletter } = require("../controllers/newsLetterControlle
 // Uncomment this when you're done testing
 // Runs every Monday at 10:00 AM UTC
 
-console.log("🗓️ Scheduling newsletter cron: '0 10 * * 1' (Monday 10 AM)");
 cron.schedule("0 10 * * 1", async () => {
   // console.log("⏰ Running weekly blog newsletter");
   try {

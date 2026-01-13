@@ -4,14 +4,6 @@ const nodemailer = require("nodemailer");
 
 let transporter;
 
-console.log("\n📧 ===== INITIALIZING MAIL TRANSPORTER =====");
-console.log(`MAIL_SERVICE: ${process.env.MAIL_SERVICE || "(none)"}`);
-console.log(`MAIL_USER: ${process.env.MAIL_USER ? "***SET***" : "❌ NOT SET"}`);
-console.log(`MAIL_PASS: ${process.env.MAIL_PASS ? "***SET***" : "❌ NOT SET"}`);
-console.log(`MAIL_HOST: ${process.env.MAIL_HOST || "(none)"}`);
-console.log(`MAIL_PORT: ${process.env.MAIL_PORT || "(none)"}`);
-console.log(`MAIL_DEBUG: ${process.env.MAIL_DEBUG === "true" ? "enabled" : "disabled"}`);
-
 if (process.env.MAIL_HOST) {
   // console.log("✅ Using custom MAIL_HOST");
   transporter = nodemailer.createTransport({
