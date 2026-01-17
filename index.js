@@ -54,9 +54,9 @@ app.use(
 )
 
 app.use('/', router);
-app.use('/blog', blogRoutes);
-// app.use("/api/newsletter", require("./routes/newsletterRoutes"));
- app.use("/api/jobs", require("./routes/jobRoutes"));
+// app.use('/blog', blogRoutes);
+// // app.use("/api/newsletter", require("./routes/newsletterRoutes"));
+//  app.use("/api/jobs", require("./routes/jobRoutes"));
 app.use(errorHandler)
 
 const PORT = process.env.PORT || 5000;

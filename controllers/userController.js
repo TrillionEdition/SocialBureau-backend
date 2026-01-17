@@ -20,14 +20,14 @@ const userController = {
 
   register: asyncHandler(async (req, res) => {
     const { clickupId, email, name, password, role, emp_id, doj, rate, phone, isEmployee } = req.body;
-    console.log("🔍 Register attempt with email:", email);
+    console.log(" Register attempt with email:", email);
 
     if (email) {
       const emailExists = await User.findOne({
         email: email.toLowerCase().trim(),
       });
 
-      console.log("✅ Email check result:", emailExists);
+      console.log("Email check result:", emailExists);
 
       if (emailExists) {
         res.status(400);
@@ -35,7 +35,6 @@ const userController = {
       }
     }
 
-    // ✅ FIX: Only check clickupId if it's provided (not undefined)
     if (clickupId) {
       const userExists = await User.findOne({ clickupId });
       if (userExists) {
@@ -44,11 +43,9 @@ const userController = {
       }
     }
 
-    // ✅ FIX: Parse tools from JSON string
     let toolsInput = req.body.tools;
     console.log("Raw tools from req.body:", toolsInput, typeof toolsInput);
 
-    // If it's a JSON string, parse it
     if (typeof toolsInput === 'string') {
       try {
         toolsInput = JSON.parse(toolsInput);
@@ -59,7 +56,6 @@ const userController = {
       }
     }
 
-    // Ensure it's an array
     if (!Array.isArray(toolsInput)) {
       toolsInput = toolsInput ? [toolsInput] : [];
     }
@@ -72,7 +68,6 @@ const userController = {
     const coverImageUrl = getUrlFromFile(coverFile);
     const idCardUrl = getUrlFromFile(idCardFile);
 
-    // ✅ Normalize tools helper
     const normalizeTool = (t) => {
       if (!t || typeof t !== "object") return null;
 
@@ -88,14 +83,12 @@ const userController = {
       };
     };
 
-    // Build array of normalized tools and dedupe by case-insensitive toolName
     const normalized = toolsInput
       .map(normalizeTool)
       .filter(Boolean);
 
     console.log("Normalized tools:", normalized);
 
-    // Deduplicate incoming toolNames (case-insensitive)
     const seen = new Set();
     const dedupedTools = [];
     for (const t of normalized) {
@@ -107,8 +100,6 @@ const userController = {
     }
 
     console.log("Deduped tools:", dedupedTools);
-
-    // ✅ Map uploaded toolIcons files to tools by array order
     const toolFiles = req.files?.toolIcons || [];
     console.log("Uploaded tool icon files count:", toolFiles.length);
 
@@ -327,7 +318,6 @@ const userController = {
       },
     });
   }),
-
 
   logout: asyncHandler(async (req, res) => {
     res.clearCookie("token")

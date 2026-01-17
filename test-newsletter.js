@@ -30,7 +30,7 @@ async function testNewsletter() {
 
     // Test email config
     console.log(`\n📧 Email Config:`);
-    console.log(`   Service: ${process.env.MAIL_SERVICE}`);
+    console.log(`   Service: ${process.env.}`);
     console.log(`   User: ${process.env.MAIL_USER}`);
     console.log(`   Password set: ${process.env.MAIL_PASS ? "✅ Yes" : "❌ No"}`);
 
