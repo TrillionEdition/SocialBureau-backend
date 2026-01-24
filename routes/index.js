@@ -9,6 +9,7 @@ const newsletterRoutes = require("./newsletterRoutes");
 const achievementRoutes = require("./achievementRoutes");
 const companyAchievementRoutes = require("./companyAchievementRoutes");
 const paymentRoutes = require("./paymentRoutes");
+const jobRoutes = require("./jobRoutes");
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ router.use("/clickup", clickupRoutes);
 router.use("/user", userRouter);
 router.use("/review", reviewRoutes);
 router.use("/qa", qaRoutes);
+router.use("/job",jobRoutes)
 router.use("/blog", blogRoutes);
 router.use("/event", eventRoutes);
 router.use("/newsletter", newsletterRoutes);
