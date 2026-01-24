@@ -2,7 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./database/connectDB");
-const { router } = require("./routes");
+const router = require("./routes");
 const errorHandler = require("./middlewares/errorHandler");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
@@ -29,11 +29,11 @@ app.use(
       if (!origin) {
         return callback(null, true);
       }
-      
+
       if (allowedOrigins.includes(origin)) {
-        callback(null, origin);        
+        callback(null, origin);
       } else {
-        console.warn("Blocked by CORS:", origin);        
+        console.warn("Blocked by CORS:", origin);
         callback(new Error("Not allowed by CORS"));
       }
     },
@@ -46,11 +46,11 @@ app.use(express.json());
 app.use(cookieParser())
 
 app.use(
-    session({
-        secret:"secret",
-        resave:false,
-        saveUninitialized:true
-    })
+  session({
+    secret: "secret",
+    resave: false,
+    saveUninitialized: true
+  })
 )
 
 app.use('/', router);

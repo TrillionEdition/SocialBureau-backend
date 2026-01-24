@@ -6,9 +6,13 @@ const qaRoutes = require("./qaRoutes");
 const blogRoutes = require("./blogRoutes");
 const eventRoutes = require("./eventRoutes");
 const newsletterRoutes = require("./newsletterRoutes");
-const router = express()
+const achievementRoutes = require("./achievementRoutes");
+const companyAchievementRoutes = require("./companyAchievementRoutes");
+const paymentRoutes = require("./paymentRoutes");
 
-router.use(express.json())
+const router = express.Router();
+
+router.use(express.json());
 
 router.use("/clickup", clickupRoutes);
 router.use("/user", userRouter);
@@ -17,5 +21,8 @@ router.use("/qa", qaRoutes);
 router.use("/blog", blogRoutes);
 router.use("/event", eventRoutes);
 router.use("/newsletter", newsletterRoutes);
+router.use("/achievement", achievementRoutes);
+router.use("/company-achievement", companyAchievementRoutes);
+// router.use("/payment", paymentRoutes);
 
-module.exports=router
+module.exports = router;

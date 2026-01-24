@@ -8,30 +8,30 @@ const userSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
-    emp_id:{
-      type:String
+    emp_id: {
+      type: String
     },
-    email:{
-        type:String,
-        require:true,
+    email: {
+      type: String,
+      require: true,
     },
-    password:{
-        type:String,
-        require:true,
-        minLength:[5,"Minimum 5 characters required"]
+    password: {
+      type: String,
+      require: true,
+      minLength: [5, "Minimum 5 characters required"]
     },
-    resetPasswordToken:{
+    resetPasswordToken: {
       type: String,
     },
     resetPasswordExpires: {
       type: Date,
     },
-    verification:{
-      type:Boolean,
-      default:false,
+    verification: {
+      type: Boolean,
+      default: false,
     },
-    phone:{
-          type:Number,
+    phone: {
+      type: Number,
     },
     // Allow multiple tools (e.g., Word, ClickUp, etc.)
     tools: [
@@ -41,10 +41,10 @@ const userSchema = new mongoose.Schema(
       },
     ],
     isEmployee:
-      {
-        type:Boolean,
-        default:false,
-      },
+    {
+      type: Boolean,
+      default: false,
+    },
 
     clients: [
       {
@@ -74,28 +74,28 @@ const userSchema = new mongoose.Schema(
         ref: "Achievement",
       },
     ],
-    coverImage: { 
-      type: String 
+    coverImage: {
+      type: String
     },
-    role: { 
-    type: String,
+    role: {
+      type: String,
     },
-    rating: { 
-      type: Number 
+    rating: {
+      type: Number
     },
-    rate: { 
-      type: Number 
+    rate: {
+      type: Number
     },
-    exp: { 
-      type: String 
+    exp: {
+      type: String
     },
-    idCard: { 
-      type: String 
+    idCard: {
+      type: String
     },
-    doj:{
-      type:Date
+    doj: {
+      type: Date
     },
-    
+
     // === Engagement & Leaderboard (SAFE ADDITION) ===
     points: {
       type: Number,
@@ -115,8 +115,8 @@ const userSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
-},
-    
+    },
+
   },
   {
     timestamps: true,

@@ -615,6 +615,138 @@ const userController = {
     res.json({ message: "Password reset successful" });
   }),
 
+  getUserById: asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id)
+      .populate("tools clients achievements reviews")
+      .lean();
+    if (user) {
+      res.json(user);
+    } else {
+      res.status(404);
+      throw new Error("User not found");
+    }
+  }),
+
+  updateUser: asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
+
+    if (user) {
+      user.name = req.body.name || user.name;
+      user.email = req.body.email || user.email;
+      user.role = req.body.role || user.role;
+      user.phone = req.body.phone || user.phone;
+      user.rate = req.body.rate || user.rate;
+      user.exp = req.body.exp || user.exp;
+      user.doj = req.body.doj || user.doj;
+      user.emp_id = req.body.emp_id || user.emp_id;
+      user.clickupId = req.body.clickupId || user.clickupId;
+      
+      if (req.body.isEmployee !== undefined) {
+        user.isEmployee = req.body.isEmployee;
+      }
+
+      // Handle Tools Update
+      if (req.body.tools) {
+        let toolsInput = req.body.tools;
+        if (typeof toolsInput === 'string') {
+          try {
+            toolsInput = JSON.parse(toolsInput);
+          } catch (err) {
+            toolsInput = [];
+          }
+        }
+        if (!Array.isArray(toolsInput)) toolsInput = toolsInput ? [toolsInput] : [];
+
+        const normalizeTool = (t) => {
+          if (!t || typeof t !== "object") return null;
+          const toolName = typeof t.toolName === "string" ? t.toolName.trim() : "";
+          if (!toolName) return null;
+          return {
+            toolName,
+            url: t.url ? t.url.trim() : undefined,
+            icon: t.icon || undefined,
+            description: t.description ? t.description.trim() : undefined,
+          };
+        };
+
+        const normalized = toolsInput.map(normalizeTool).filter(Boolean);
+        const seen = new Set();
+        const dedupedTools = [];
+        for (const t of normalized) {
+          const key = t.toolName.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            dedupedTools.push(t);
+          }
+        }
+
+        const toolFiles = req.files?.toolIcons || [];
+        for (let i = 0; i < dedupedTools.length; i++) {
+          const t = dedupedTools[i];
+          if (!t.icon && toolFiles[i]) {
+            const iconUrl = getUrlFromFile(toolFiles[i]);
+            if (iconUrl) t.icon = iconUrl;
+          }
+        }
+
+        const toolIds = await Promise.all(dedupedTools.map(async (t) => {
+          const existing = await Tool.findOne({
+            toolName: { $regex: `^${escapeRegExp(t.toolName)}$`, $options: 'i' }
+          });
+          if (existing) {
+            let changed = false;
+            if (t.url && existing.url !== t.url) { existing.url = t.url; changed = true; }
+            if (t.icon && existing.icon !== t.icon) { existing.icon = t.icon; changed = true; }
+            if (t.description && existing.description !== t.description) { existing.description = t.description; changed = true; }
+            if (changed) await existing.save();
+            return existing._id;
+          }
+          try {
+            const created = await Tool.create(t);
+            return created._id;
+          } catch (err) {
+            if (err.code === 11000) {
+              const retry = await Tool.findOne({ toolName: { $regex: `^${escapeRegExp(t.toolName)}$`, $options: 'i' } });
+              if (retry) return retry._id;
+            }
+            throw err;
+          }
+        }));
+        
+        user.tools = toolIds;
+      }
+
+      // Handle file uploads
+      const coverFile = req.files?.coverImage?.[0];
+      const idCardFile = req.files?.idCard?.[0];
+
+      if (coverFile) {
+        user.coverImage = getUrlFromFile(coverFile);
+      }
+      if (idCardFile) {
+        user.idCard = getUrlFromFile(idCardFile);
+      }
+
+      if (req.body.password) {
+        user.password = await bcrypt.hash(req.body.password, 10);
+      }
+
+      const updatedUser = await user.save();
+
+      res.json({
+        _id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isEmployee: updatedUser.isEmployee,
+      });
+    } else {
+      res.status(404);
+      throw new Error("User not found");
+    }
+  }),
+
+
 };
 
 module.exports = userController;

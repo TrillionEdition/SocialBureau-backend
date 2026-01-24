@@ -56,7 +56,7 @@ const userAuthentication = require("../middlewares/userAuthentication");
 const blogRoutes = express.Router();
 
 // Create new blog (with multiple image uploads - main image + section images)
-blogRoutes.post('/blogs', upload.fields([
+blogRoutes.post('/blogs', userAuthentication, upload.fields([
   { name: 'image', maxCount: 1 },
   { name: 'sectionImage_0', maxCount: 1 },
   { name: 'sectionImage_1', maxCount: 1 },

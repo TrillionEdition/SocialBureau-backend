@@ -18,22 +18,8 @@ const achievementSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
-    points: {
-      type: Number,
-      default: 0,
-      min: 0,
-    },
-    badge: {
+    image: {
       type: String,
-      trim: true,
-    },
-    dateEarned: {
-      type: Date,
-      default: Date.now,
-    },
-    isPublic: {
-      type: Boolean,
-      default: true,
     },
   },
   {

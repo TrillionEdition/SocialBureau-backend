@@ -16,5 +16,14 @@ userRouter.put('/clients',userController.updateClient)
 userRouter.get("/leaderboard", userController.getLeaderboard);
 userRouter.post("/forgot-password", userController.forgotPassword);
 userRouter.post("/reset-password/:token", userController.resetPassword);
+
+// Specific user routes (must come after static routes like /team, /leaderboard to avoid conflicts if IDs are not validated)
+userRouter.get('/:id', userController.getUserById);
+userRouter.put('/:id', upload.fields([
+    { name: 'coverImage', maxCount: 1 },
+    { name: 'idCard', maxCount: 1 },
+    { name: 'toolIcons', maxCount: 20 }
+]), userController.updateUser);
+
 module.exports=userRouter
 

@@ -737,6 +737,9 @@ const blogController = {
     try {
       const { title, excerpt, content, category, author, slug, customUrl, keywords, childBlogs, seoTitle, seoDescription } = req.body;
 
+      // Get user ID from authenticated request
+      const userId = req.user?._id || req.user?.id;
+
       if (!title) return sendError(res, 400, 'Title is required');
       
       // Parse content if it comes as string
@@ -835,6 +838,7 @@ const blogController = {
         image: imageUrl,
         category: category || 'general',
         authorName: author || 'SocialBureau Team',
+        user: userId, // Link blog to the creator
         keywords: keywordsArray || [],
         childBlogs: childBlogsArray || [],
         published: true,
@@ -863,6 +867,7 @@ const blogController = {
         category,
         published,
         q,
+        userId, // Add userId to query params
       } = req.query;
 
       const p = Math.max(1, parseInt(page, 10) || 1);
@@ -870,8 +875,15 @@ const blogController = {
 
       const filter = {};
 
-      // Only filter by published if explicitly provided, otherwise show all published blogs
-      if (published !== undefined) {
+      // Filter by user if provided
+      if (userId) {
+        filter.user = userId;
+      }
+
+      // Filter by published status
+      if (published === 'all') {
+        // Do not add filter.published to show both published and drafts
+      } else if (published !== undefined) {
         filter.published = published === 'true' || published === '1' || published === true;
       } else {
         filter.published = true; // Default to only published blogs

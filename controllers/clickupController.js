@@ -1,5 +1,6 @@
 const express = require("express");
 const User = require("../models/userModel");
+const Achievement = require("../models/achievementModel");
 const expressAsyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
 
@@ -63,33 +64,50 @@ const clickupController = {
       }
       const includeSensitive =
         String(req.query.includeSensitive).toLowerCase() === "true";
-      const query = User.findOne(
-        { name: userName },
-        "name dp clickupId rating doj rate coverImage idCard tools role email clients"
-      )
-      .populate([
-        {
-          path: "tools",
-          select: "toolName url icon description -_id"
-        },
-        {
-          path: "clients",
-          select: "name website logo -_id"
-        },
-        {
-          path: "reviews",
-          select: "name company review rating createdAt -_id",
-          match: { approved: true }
-        }
-      ]);
+      const query = User.findOne({
+        name: { $regex: new RegExp(`^${userName.trim()}$`, "i") }
+      })
+        .populate([
+          {
+            path: "tools",
+            select: "toolName url icon description -_id"
+          },
+          {
+            path: "clients",
+            select: "name website logo -_id"
+          },
+          {
+            path: "reviews",
+            select: "name company review rating createdAt -_id",
+            match: { approved: true }
+          },
+          {
+            path: "achievements",
+            select: "title description image createdAt"
+          }
+        ]);
 
       if (includeSensitive) {
-        query = query.select("+password");
+        query.select("+password");
       }
+
       const user = await query.lean().exec();
+
       if (!user) {
         return res.status(404).json({ message: "User not found" });
       }
+
+      // Fallback: If achievements array is empty in user doc, check the Achievement collection directly
+      if (!user.achievements || user.achievements.length === 0) {
+        const directAchievements = await Achievement.find({ user: user._id })
+          .select("title description image createdAt")
+          .lean();
+        if (directAchievements.length > 0) {
+          user.achievements = directAchievements;
+        }
+      }
+
+      console.log(`Final user achievements count for ${userName}: ${user?.achievements?.length || 0}`);
 
       // Remove password unless explicitly requested
       if (!includeSensitive && user.password) {
@@ -156,9 +174,9 @@ const clickupController = {
         totalMinutes,
         totalHours,
         uniqueTaskIds,
-        tasks:tasks.length,
+        tasks: tasks.length,
       };
-      
+
       return res.json({ user, clickup: clickupPayload });
     } catch (err) {
       console.error(err);
