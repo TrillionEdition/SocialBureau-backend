@@ -125,7 +125,7 @@
 
 // controllers/newsLetterController.js
 const Subscriber = require("../models/Subscriber");
-const NewsletterState = require("../models/NewsletterState");
+
 const sendMail = require("../utils/sendMail");
 const blogJobTemplate = require("../utils/blogEmailTemplate");
 
@@ -142,23 +142,8 @@ exports.sendLatestBlogNewsletter = async () => {
 
   const job = await getLatestActiveJob();
 
-  const state =
-    (await NewsletterState.findOne()) ||
-    (await NewsletterState.create({}));
+  // Check removed: Always send latest blog/job regardless of previous history
 
-  // FIXED: Check if blog was sent TODAY (not just if it was ever sent)
-  // This allows you to send the same blog multiple times per day if needed
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-  if (
-    state.lastSentBlogId?.toString() === blog._id.toString() &&
-    state.lastSentAt &&
-    new Date(state.lastSentAt) >= today
-  ) {
-    console.log("ℹ️ Blog already sent today, skipping");
-    return;
-  }
 
   const subscribers = await Subscriber.find({ isActive: true });
 
@@ -191,12 +176,10 @@ exports.sendLatestBlogNewsletter = async () => {
     `📊 Newsletter delivery: ${successCount} sent, ${failureCount} failed`
   );
 
-  // Update state for next run
-  state.lastSentBlogId = blog._id;
-  state.lastSentAt = new Date();
-  await state.save();
+  // State update removed
 
-  console.log("✅ Newsletter completed");
+
+  // console.log("✅ Newsletter completed");
 };
 
 exports.subscribeNewsletter = async (req, res) => {
@@ -209,8 +192,8 @@ exports.subscribeNewsletter = async (req, res) => {
 
     const subscriber = await Subscriber.findOneAndUpdate(
       { email: email.toLowerCase().trim() },
-      { 
-        email: email.toLowerCase().trim(), 
+      {
+        email: email.toLowerCase().trim(),
         isActive: true,
         subscribedAt: new Date(),
       },
@@ -227,7 +210,7 @@ exports.subscribeNewsletter = async (req, res) => {
           subject: `Welcome! Read our latest blog: ${blog.title}`,
           html: blogJobTemplate({ blog, job }),
         });
-        console.log(`✅ Welcome email sent to ${subscriber.email}`);
+        // console.log(`✅ Welcome email sent to ${subscriber.email}`);
       } catch (err) {
         console.error(
           `⚠️ Welcome email failed for ${subscriber.email}:`,
@@ -273,8 +256,8 @@ exports.sendTestNewsletter = async (req, res) => {
     });
 
     console.log(`✅ Test email sent to ${email}`);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: "Test email sent successfully",
       blog: { title: blog.title, slug: blog.slug },
     });

@@ -21,7 +21,8 @@ router.use("/user", userRouter);
 router.use("/review", reviewRoutes);
 router.use("/qa", qaRoutes);
 router.use("/job", jobRoutes)
-router.use("/blog", blogRoutes);
+// Use plural '/blogs' to match frontend API expectations
+router.use("/blogs", blogRoutes);
 router.use("/event", eventRoutes);
 router.use("/newsletter", newsletterRoutes);
 router.use("/achievement", achievementRoutes);
