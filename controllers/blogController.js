@@ -22,7 +22,7 @@ const blogController = {
       const userId = req.user?._id || req.user?.id;
 
       if (!title) return sendError(res, 400, 'Title is required');
-      
+
       // Parse content if it comes as string
       let contentArray = content;
       if (typeof content === 'string') {
@@ -32,7 +32,7 @@ const blogController = {
           return sendError(res, 400, 'Content must be a valid array or JSON string');
         }
       }
-      
+
       if (!contentArray || !Array.isArray(contentArray)) {
         return sendError(res, 400, 'Content is required and must be an array');
       }
@@ -56,7 +56,7 @@ const blogController = {
           totalWords += plainText.trim().split(/\s+/).length;
         }
       });
-      
+
       if (totalWords > 2000) {
         return sendError(res, 400, `Content exceeds maximum word limit. Current: ${totalWords} words, Maximum: 2000 words`);
       }
@@ -142,7 +142,7 @@ const blogController = {
   getBlogs: expressAsyncHandler(async (req, res) => {
     try {
       const { category, limit = 10, published = true } = req.query;
-      
+
       let query = { published };
       if (category && category !== 'All Posts') {
         query.category = category;
@@ -219,6 +219,11 @@ const blogController = {
           updates[k] = req.body[k];
       });
 
+      // Update publishedAt if published is set to true
+      if (updates.published === true) {
+        updates.publishedAt = new Date();
+      }
+
       // Validate word count if content is being updated
       if (updates.content) {
         let totalWords = 0;
@@ -228,7 +233,7 @@ const blogController = {
             totalWords += plainText.trim().split(/\s+/).length;
           }
         });
-        
+
         if (totalWords > 2000) {
           return sendError(res, 400, `Content exceeds maximum word limit. Current: ${totalWords} words, Maximum: 2000 words`);
         }
@@ -360,8 +365,9 @@ const blogController = {
         return sendError(res, 401, 'User must be logged in to comment');
       }
 
-      const blog = await Blog.findOne({ slug });
-      if (!blog) return sendError(res, 404, 'Blog not found');
+      // Check if blog exists first
+      const blogExists = await Blog.exists({ slug });
+      if (!blogExists) return sendError(res, 404, 'Blog not found');
 
       // Get user name from another collection or use email
       const userName = req.user?.name || userEmail || 'User';
@@ -370,19 +376,26 @@ const blogController = {
         _id: new mongoose.Types.ObjectId(),
         text: text.trim(),
         author: userName,
-        userId: userId,
+        userId: new mongoose.Types.ObjectId(userId), // Explicit cast
         userEmail: userEmail,
         createdAt: new Date(),
       };
 
-      blog.comments.push(newComment);
-      await blog.save();
+      // Use atomic update to avoid full document validation
+      const updatedBlog = await Blog.findOneAndUpdate(
+        { slug },
+        { $push: { comments: newComment } },
+        { new: true, runValidators: false } // runValidators: false ensures we don't re-validate the whole blog
+      ).select('comments');
+
+      if (!updatedBlog) return sendError(res, 404, 'Blog not found');
+
       await addComment(userId);
 
       res.status(201).json({
         success: true,
         comment: newComment,
-        totalComments: blog.comments.length,
+        totalComments: updatedBlog.comments.length,
         message: 'Comment added successfully',
       });
     } catch (err) {
@@ -401,7 +414,7 @@ const blogController = {
         return sendError(res, 401, 'User must be logged in to delete comments');
       }
 
-      const blog = await Blog.findOne({ slug });
+      const blog = await Blog.findOne({ slug }).select('comments');
       if (!blog) return sendError(res, 404, 'Blog not found');
 
       const comment = blog.comments.id(commentId);
@@ -414,14 +427,19 @@ const blogController = {
         return sendError(res, 403, 'You can only delete your own comments');
       }
 
-      blog.comments.pull({ _id: comment._id });
-      await blog.save();
+      // Use atomic update
+      const updatedBlog = await Blog.findOneAndUpdate(
+        { slug },
+        { $pull: { comments: { _id: commentId } } },
+        { new: true }
+      ).select('comments');
+
       await removeComment(userId);
 
       res.json({
         success: true,
         message: 'Comment deleted successfully',
-        totalComments: blog.comments.length,
+        totalComments: updatedBlog.comments.length,
       });
     } catch (err) {
       console.error('deleteComment error:', err);

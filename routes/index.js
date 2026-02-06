@@ -8,7 +8,7 @@ const eventRoutes = require("./eventRoutes");
 const newsletterRoutes = require("./newsletterRoutes");
 const achievementRoutes = require("./achievementRoutes");
 const companyAchievementRoutes = require("./companyAchievementRoutes");
-const paymentRoutes = require("./paymentRoutes");
+// const paymentRoutes = require("./paymentRoutes");
 const jobRoutes = require("./jobRoutes");
 const clientReviewRoutes = require('./clientReviewRoutes');
 
@@ -21,8 +21,7 @@ router.use("/user", userRouter);
 router.use("/review", reviewRoutes);
 router.use("/qa", qaRoutes);
 router.use("/job", jobRoutes)
-// Use plural '/blogs' to match frontend API expectations
-router.use("/blogs", blogRoutes);
+router.use("/blog", blogRoutes);
 router.use("/event", eventRoutes);
 router.use("/newsletter", newsletterRoutes);
 router.use("/achievement", achievementRoutes);
