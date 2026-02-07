@@ -141,21 +141,28 @@ const blogController = {
   // List blogs
   getBlogs: expressAsyncHandler(async (req, res) => {
     try {
-      const { category, limit = 10, published = true } = req.query;
+      const { category, limit = 10, published = 'true' } = req.query;
+      console.log('📚 getBlogs called with params:', { category, limit, published });
 
-      let query = { published };
+      // Convert published string to boolean
+      const isPublished = published === 'true' || published === true;
+
+      let query = { published: isPublished };
       if (category && category !== 'All Posts') {
         query.category = category;
       }
 
+      console.log('🔍 Querying blogs with:', query);
       const blogs = await Blog.find(query)
         .sort('-createdAt')
         .limit(parseInt(limit))
         .lean();
 
+      console.log(`✅ Found ${blogs.length} blogs`);
       return res.json({ success: true, data: blogs });
     } catch (err) {
-      console.error('getBlogs error', err);
+      console.error('❌ getBlogs error:', err);
+      console.error('Error stack:', err.stack);
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),
@@ -164,6 +171,7 @@ const blogController = {
   getBlogBySlug: expressAsyncHandler(async (req, res) => {
     try {
       const { slug } = req.params;
+      console.log('📖 getBlogBySlug called for slug:', slug);
 
       // Increment view count safely (skip if DB not ready)
       try {
@@ -177,15 +185,21 @@ const blogController = {
         console.warn('view increment error:', err && err.message ? err.message : err);
       }
 
+      console.log('🔍 Querying blog with slug:', slug);
       const blog = await Blog.findOne({ slug })
         .populate('childBlogs', 'title slug excerpt image category')
         .lean();
 
-      if (!blog) return sendError(res, 404, 'Blog not found');
+      if (!blog) {
+        console.log('❌ Blog not found for slug:', slug);
+        return sendError(res, 404, 'Blog not found');
+      }
 
+      console.log('✅ Blog found:', blog.title);
       return res.json({ success: true, data: blog });
     } catch (err) {
-      console.error('getBlogBySlug error', err);
+      console.error('❌ getBlogBySlug error:', err);
+      console.error('Error stack:', err.stack);
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),

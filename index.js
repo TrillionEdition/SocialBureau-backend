@@ -6,7 +6,6 @@ const router = require("./routes");
 const errorHandler = require("./middlewares/errorHandler");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
-const blogRoutes = require("./routes/blogRoutes");
 const app = express();
 
 connectDB().then(() => {
@@ -19,44 +18,45 @@ connectDB().then(() => {
 
 const allowedOrigins = [
   "https://www.socialbureau.in",
+  "https://socialbureau.in",
   "http://localhost:5173",
 ];
 
 app.use(
   cors({
-    origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, Postman, etc.)
-      if (!origin) {
-        return callback(null, true);
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        callback(null, origin);
-      } else {
-        console.warn("Blocked by CORS:", origin);
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
+    origin: allowedOrigins,
     credentials: true,
   })
 );
 
-
 app.use(express.json());
 app.use(cookieParser())
 
+app.set("trust proxy", 1);
+
 app.use(
   session({
-    secret: "secret",
+    name: "sb.sid",
+    secret: process.env.SESSION_SECRET || "fallback-secret-key-change-in-production",
     resave: false,
-    saveUninitialized: true
+    saveUninitialized: false,
+    cookie: {
+      secure: process.env.NODE_ENV === 'production',       // HTTPS only in production
+      sameSite: process.env.NODE_ENV === 'production' ? "none" : "lax",   // cross-domain in production
+      httpOnly: true,
+    },
   })
-)
+);
+
+// app.use(
+//   session({
+//     secret: "secret",
+//     resave: false,
+//     saveUninitialized: true
+//   })
+// )
 
 app.use('/', router);
-// app.use('/blog', blogRoutes);
-// // app.use("/api/newsletter", require("./routes/newsletterRoutes"));
-//  app.use("/api/jobs", require("./routes/jobRoutes"));
 app.use(errorHandler)
 
 const PORT = process.env.PORT || 5000;
