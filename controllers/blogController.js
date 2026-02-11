@@ -2,18 +2,15 @@ const mongoose = require('mongoose');
 const Blog = require('../models/blogModel');
 const expressAsyncHandler = require('express-async-handler');
 const {
-  addLike,
-  removeLike,
   addComment,
   removeComment,
-} = require("../services/engagementService");
+} = require('../services/engagementService');
 
 function sendError(res, status = 400, message = 'Bad Request', details = null) {
   const payload = { success: false, message };
   if (details) payload.details = details;
   return res.status(status).json(payload);
 }
-
 
 const blogController = {
   // Create a new blog post
@@ -25,7 +22,7 @@ const blogController = {
       const userId = req.user?._id || req.user?.id;
 
       if (!title) return sendError(res, 400, 'Title is required');
-      
+
       // Parse content if it comes as string
       let contentArray = content;
       if (typeof content === 'string') {
@@ -35,7 +32,7 @@ const blogController = {
           return sendError(res, 400, 'Content must be a valid array or JSON string');
         }
       }
-      
+
       if (!contentArray || !Array.isArray(contentArray)) {
         return sendError(res, 400, 'Content is required and must be an array');
       }
@@ -59,7 +56,7 @@ const blogController = {
           totalWords += plainText.trim().split(/\s+/).length;
         }
       });
-      
+
       if (totalWords > 2000) {
         return sendError(res, 400, `Content exceeds maximum word limit. Current: ${totalWords} words, Maximum: 2000 words`);
       }
@@ -141,66 +138,31 @@ const blogController = {
     }
   }),
 
-  // List all blog posts with filters
-  listBlogs: expressAsyncHandler(async (req, res) => {
+  // List blogs
+  getBlogs: expressAsyncHandler(async (req, res) => {
     try {
-      const {
-        page = 1,
-        limit = 20,
-        sort = '-createdAt',
-        category,
-        published,
-        q,
-        userId, // Add userId to query params
-      } = req.query;
+      const { category, limit = 10, published = 'true' } = req.query;
+      console.log('📚 getBlogs called with params:', { category, limit, published });
 
-      const p = Math.max(1, parseInt(page, 10) || 1);
-      const l = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+      // Convert published string to boolean
+      const isPublished = published === 'true' || published === true;
 
-      const filter = {};
-
-      // Filter by user if provided
-      if (userId) {
-        filter.user = userId;
+      let query = { published: isPublished };
+      if (category && category !== 'All Posts') {
+        query.category = category;
       }
 
-      // Filter by published status
-      if (published === 'all') {
-        // Do not add filter.published to show both published and drafts
-      } else if (published !== undefined) {
-        filter.published = published === 'true' || published === '1' || published === true;
-      } else {
-        filter.published = true; // Default to only published blogs
-      }
-      
-      if (category && category !== 'All Posts') filter.category = category;
+      console.log('🔍 Querying blogs with:', query);
+      const blogs = await Blog.find(query)
+        .sort('-createdAt')
+        .limit(parseInt(limit))
+        .lean();
 
-      if (q) {
-        filter.$or = [
-          { title: { $regex: q, $options: 'i' } },
-          { excerpt: { $regex: q, $options: 'i' } },
-        ];
-      }
-
-      const skip = (p - 1) * l;
-
-      const [items, total] = await Promise.all([
-        Blog.find(filter).skip(skip).limit(l).sort(sort).lean(),
-        Blog.countDocuments(filter),
-      ]);
-
-      return res.json({
-        success: true,
-        meta: {
-          page: p,
-          limit: l,
-          total,
-          pages: Math.ceil(total / l),
-        },
-        data: items,
-      });
+      console.log(`✅ Found ${blogs.length} blogs`);
+      return res.json({ success: true, data: blogs });
     } catch (err) {
-      console.error('listBlogs error', err);
+      console.error('❌ getBlogs error:', err);
+      console.error('Error stack:', err.stack);
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),
@@ -209,18 +171,35 @@ const blogController = {
   getBlogBySlug: expressAsyncHandler(async (req, res) => {
     try {
       const { slug } = req.params;
+      console.log('📖 getBlogBySlug called for slug:', slug);
+
+      // Increment view count safely (skip if DB not ready)
+      try {
+        if (mongoose.connection.readyState === 1) { // 1 = connected
+          // don't await so that even if it fails we still return the blog quickly
+          Blog.findOneAndUpdate({ slug }, { $inc: { 'meta.views': 1 } }).catch(err => console.warn('view increment failed:', err.message));
+        } else {
+          console.warn('Skipping view increment - mongoose not connected (readyState=' + mongoose.connection.readyState + ')');
+        }
+      } catch (err) {
+        console.warn('view increment error:', err && err.message ? err.message : err);
+      }
+
+      console.log('🔍 Querying blog with slug:', slug);
       const blog = await Blog.findOne({ slug })
         .populate('childBlogs', 'title slug excerpt image category')
         .lean();
-        
-      if (!blog) return sendError(res, 404, 'Blog not found');
 
-      // Increment view count
-      await Blog.findOneAndUpdate({ slug }, { $inc: { 'meta.views': 1 } });
+      if (!blog) {
+        console.log('❌ Blog not found for slug:', slug);
+        return sendError(res, 404, 'Blog not found');
+      }
 
+      console.log('✅ Blog found:', blog.title);
       return res.json({ success: true, data: blog });
     } catch (err) {
-      console.error('getBlogBySlug error', err);
+      console.error('❌ getBlogBySlug error:', err);
+      console.error('Error stack:', err.stack);
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),
@@ -254,6 +233,11 @@ const blogController = {
           updates[k] = req.body[k];
       });
 
+      // Update publishedAt if published is set to true
+      if (updates.published === true) {
+        updates.publishedAt = new Date();
+      }
+
       // Validate word count if content is being updated
       if (updates.content) {
         let totalWords = 0;
@@ -263,7 +247,7 @@ const blogController = {
             totalWords += plainText.trim().split(/\s+/).length;
           }
         });
-        
+
         if (totalWords > 2000) {
           return sendError(res, 400, `Content exceeds maximum word limit. Current: ${totalWords} words, Maximum: 2000 words`);
         }
@@ -331,174 +315,170 @@ const blogController = {
     }
   }),
 
+  // Like/unlike blog (toggle) — use atomic updates to avoid full-document validation
+  likeBlog: expressAsyncHandler(async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const userId = req.user?.id;
 
-likeBlog: expressAsyncHandler(async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const userId = req.user?.id; // From auth middleware
-    console.log("slug",slug);
-    
-    if (!userId) {
-      return sendError(res, 401, 'User must be logged in to like');
+      if (!userId) {
+        return sendError(res, 401, 'User must be logged in to like');
+      }
+
+      // Read existing likedBy to determine toggle state
+      const blog = await Blog.findOne({ slug }).select('likedBy meta');
+      if (!blog) {
+        return sendError(res, 404, 'Blog not found');
+      }
+
+      const userIdStr = userId.toString();
+      const alreadyLiked = Array.isArray(blog.likedBy) && blog.likedBy.some(id => id.toString() === userIdStr);
+
+      // Use atomic operators to avoid triggering validation on unrelated fields
+      let update;
+      if (alreadyLiked) {
+        update = { $pull: { likedBy: new mongoose.Types.ObjectId(userId) }, $inc: { 'meta.likes': -1 } };
+      } else {
+        update = { $addToSet: { likedBy: new mongoose.Types.ObjectId(userId) }, $inc: { 'meta.likes': 1 } };
+      }
+
+      let updated = await Blog.findOneAndUpdate({ slug }, update, { new: true }).select('likedBy meta').lean();
+
+      // Ensure meta.likes is not negative
+      if (updated.meta && updated.meta.likes < 0) {
+        updated = await Blog.findOneAndUpdate({ slug }, { $set: { 'meta.likes': 0 } }, { new: true }).select('likedBy meta').lean();
+      }
+
+      const likesCount = Array.isArray(updated.likedBy) ? updated.likedBy.length : (updated.meta?.likes ?? 0);
+
+      res.json({
+        success: true,
+        likes: likesCount,
+        isLiked: !alreadyLiked,
+        message: alreadyLiked ? 'Unliked' : 'Liked',
+      });
+    } catch (err) {
+      console.error('likeBlog error', err);
+      return sendError(res, 500, 'Internal server error', err.message);
     }
+  }),
 
-    const blog = await Blog.findOne({ slug });
-    if (!blog) return sendError(res, 404, 'Blog not found');
+  // Add comment
+  addComment: expressAsyncHandler(async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const { text } = req.body;
+      const userId = req.user?.id; // From auth middleware
+      const userEmail = req.user?.email;
 
-    // Check if user already liked
-    const userIdStr = userId.toString();
-    const alreadyLiked = blog.likedBy.some(id => id.toString() === userIdStr);
-    
-if (alreadyLiked) {
-  blog.likedBy = blog.likedBy.filter(id => id.toString() !== userIdStr);
+      if (!text || !text.trim()) {
+        return sendError(res, 400, 'Comment text is required');
+      }
 
-  await removeLike(userId);
-} else {
-  blog.likedBy.push(userId);
+      if (!userId) {
+        return sendError(res, 401, 'User must be logged in to comment');
+      }
 
-  await addLike(userId);
-}
+      // Check if blog exists first
+      const blogExists = await Blog.exists({ slug });
+      if (!blogExists) return sendError(res, 404, 'Blog not found');
 
-    await blog.save();
+      // Get user name from another collection or use email
+      const userName = req.user?.name || userEmail || 'User';
 
-    // ✅ Return total likes count and current user's like status
-    res.json({
-      success: true,
-      likes: blog.likedBy.length, // Total unique likes
-      isLiked: !alreadyLiked, // Current user's new status
-      likedBy: blog.likedBy, // Full array for frontend validation
-      message: alreadyLiked ? 'Post unliked' : 'Post liked',
-    });
-  } catch (err) {
-    console.error('likeBlog error:', err);
-    return sendError(res, 500, 'Internal server error', err.message);
-  }
-}),
+      const newComment = {
+        _id: new mongoose.Types.ObjectId(),
+        text: text.trim(),
+        author: userName,
+        userId: new mongoose.Types.ObjectId(userId), // Explicit cast
+        userEmail: userEmail,
+        createdAt: new Date(),
+      };
 
-// ✅ ADD COMMENT - With user tracking
-addComment: expressAsyncHandler(async (req, res) => {
-  try {
-    const { slug } = req.params;
-    const { text } = req.body;
-    const userId = req.user?.id; // From auth middleware
-    const userEmail = req.user?.email;
+      // Use atomic update to avoid full document validation
+      const updatedBlog = await Blog.findOneAndUpdate(
+        { slug },
+        { $push: { comments: newComment } },
+        { new: true, runValidators: false } // runValidators: false ensures we don't re-validate the whole blog
+      ).select('comments');
 
-    if (!text || !text.trim()) {
-      return sendError(res, 400, 'Comment text is required');
+      if (!updatedBlog) return sendError(res, 404, 'Blog not found');
+
+      await addComment(userId);
+
+      res.status(201).json({
+        success: true,
+        comment: newComment,
+        totalComments: updatedBlog.comments.length,
+        message: 'Comment added successfully',
+      });
+    } catch (err) {
+      console.error('addComment error:', err);
+      return sendError(res, 500, 'Internal server error', err.message);
     }
+  }),
 
-    if (!userId) {
-      return sendError(res, 401, 'User must be logged in to comment');
+  // Delete comment - only own comment
+  deleteComment: expressAsyncHandler(async (req, res) => {
+    try {
+      const { slug, commentId } = req.params;
+      const userId = req.user?.id; // From auth middleware
+
+      if (!userId) {
+        return sendError(res, 401, 'User must be logged in to delete comments');
+      }
+
+      const blog = await Blog.findOne({ slug }).select('comments');
+      if (!blog) return sendError(res, 404, 'Blog not found');
+
+      const comment = blog.comments.id(commentId);
+      if (!comment) return sendError(res, 404, 'Comment not found');
+
+      const commentUserIdStr = comment.userId?.toString();
+      const userIdStr = userId.toString();
+
+      if (commentUserIdStr !== userIdStr) {
+        return sendError(res, 403, 'You can only delete your own comments');
+      }
+
+      // Use atomic update
+      const updatedBlog = await Blog.findOneAndUpdate(
+        { slug },
+        { $pull: { comments: { _id: commentId } } },
+        { new: true }
+      ).select('comments');
+
+      await removeComment(userId);
+
+      res.json({
+        success: true,
+        message: 'Comment deleted successfully',
+        totalComments: updatedBlog.comments.length,
+      });
+    } catch (err) {
+      console.error('deleteComment error:', err);
+      return sendError(res, 500, 'Internal server error', err.message);
     }
+  }),
 
-    const blog = await Blog.findOne({ slug });
-    if (!blog) return sendError(res, 404, 'Blog not found');
+  // Get comments for a blog
+  getComments: expressAsyncHandler(async (req, res) => {
+    try {
+      const { slug } = req.params;
 
-    // Get user name from another collection or use email
-    const userName = req.user?.name || userEmail || "User";
+      const blog = await Blog.findOne({ slug }).select('comments');
+      if (!blog) return sendError(res, 404, 'Blog not found');
 
-    const newComment = {
-      _id: new mongoose.Types.ObjectId(),
-      text: text.trim(),
-      author: userName, // ✅ Use actual username
-      userId: userId,
-      userEmail: userEmail,
-      createdAt: new Date(),
-    };
-
-    blog.comments.push(newComment);
-    await blog.save();
-    await addComment(userId);
-
-
-    console.log(`Comment added by ${userId} on blog ${slug}`);
-
-    res.status(201).json({
-      success: true,
-      comment: newComment,
-      totalComments: blog.comments.length,
-      message: 'Comment added successfully',
-    });
-  } catch (err) {
-    console.error('addComment error:', err);
-    return sendError(res, 500, 'Internal server error', err.message);
-  }
-}),
-
-// ✅ DELETE COMMENT - Only own comments
-deleteComment: expressAsyncHandler(async (req, res) => {
-  try {
-    const { slug, commentId } = req.params;
-    const userId = req.user?.id; // From auth middleware
-
-    console.log(`Delete attempt - slug: ${slug}, commentId: ${commentId}, userId: ${userId}`);
-
-    if (!userId) {
-      return sendError(res, 401, 'User must be logged in to delete comments');
+      res.json({
+        success: true,
+        comments: blog.comments,
+        totalComments: blog.comments.length,
+      });
+    } catch (err) {
+      console.error('getComments error:', err);
+      return sendError(res, 500, 'Internal server error', err.message);
     }
-
-    const blog = await Blog.findOne({ slug });
-    if (!blog) return sendError(res, 404, 'Blog not found');
-
-    const comment = blog.comments.id(commentId);
-    console.log(`Comment found:`, comment);
-    
-    if (!comment) return sendError(res, 404, 'Comment not found');
-
-    // ✅ Only allow user to delete their own comment
-    const commentUserIdStr = comment.userId?.toString();
-    const userIdStr = userId.toString();
-
-    console.log(`Ownership check - commentUserIdStr: ${commentUserIdStr}, userIdStr: ${userIdStr}`);
-
-    if (commentUserIdStr !== userIdStr) {
-      return sendError(res, 403, 'You can only delete your own comments');
-    }
-
-    // ✅ Remove the comment from the array using proper ObjectId
-    const result = blog.comments.pull({ _id: new mongoose.Types.ObjectId(commentId) });
-    console.log(`Pull result:`, result);
-    
-    await blog.save();
-    console.log(`Blog saved after comment deletion`);
-
-    await removeComment(userId);
-
-
-    console.log(`Comment ${commentId} deleted by user ${userId}`);
-
-    res.json({
-      success: true,
-      message: 'Comment deleted successfully',
-      totalComments: blog.comments.length,
-    });
-  } catch (err) {
-    console.error('deleteComment error:', err);
-    return sendError(res, 500, 'Internal server error', err.message);
-  }
-}),
-
-// ✅ GET COMMENTS - Public
-getComments: expressAsyncHandler(async (req, res) => {
-  try {
-    const { slug } = req.params;
-
-    const blog = await Blog.findOne({ slug }).select('comments');
-    if (!blog) return sendError(res, 404, 'Blog not found');
-
-    res.json({
-      success: true,
-      comments: blog.comments,
-      totalComments: blog.comments.length,
-    });
-  } catch (err) {
-    console.error('getComments error:', err);
-    return sendError(res, 500, 'Internal server error', err.message);
-  }
-}),
+  }),
 };
 
-
-
 module.exports = blogController;
-
