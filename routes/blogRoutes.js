@@ -1,11 +1,11 @@
 // const express = require('express');
-// const router = express.Router();
 // const blogController = require('../controllers/blogController');
 // const upload = require('../middlewares/cloudinary');
+// const userAuthentication = require("../middlewares/userAuthentication");
+
 // const blogRoutes = express.Router();
 
-// // Create new blog (with multiple image uploads - main image + section images)
-// blogRoutes.post('/blogs', upload.fields([
+// blogRoutes.post('/', userAuthentication, upload.fields([
 //   { name: 'image', maxCount: 1 },
 //   { name: 'sectionImage_0', maxCount: 1 },
 //   { name: 'sectionImage_1', maxCount: 1 },
@@ -19,44 +19,54 @@
 //   { name: 'sectionImage_9', maxCount: 1 },
 // ]), blogController.createBlog);
 
-// // Get latest blogs (MUST be before /:slug route)
-// blogRoutes.get('/blogs/latest', blogController.getLatestBlogs);
-
-// // List all blogs
-// blogRoutes.get('/blogs', blogController.listBlogs);
-
-// // Get stats
 // blogRoutes.get('/stats', blogController.getStats);
 
-// // Get single blog by slug (MUST be after /latest route)
-// blogRoutes.get('/blogs/:slug', blogController.getBlogBySlug);
+// // Get latest blogs
+// blogRoutes.get('/latest', blogController.getLatestBlogs);
+
+// // Get all blogs (with filtering)
+// blogRoutes.get('/', blogController.getBlogs);
+
+// blogRoutes.get('/:slug', blogController.getBlogBySlug);
 
 // // Update blog
-// blogRoutes.patch('/blogs/:slug', blogController.updateBlog);
+// blogRoutes.put('/:slug', userAuthentication, blogController.updateBlog);
 
 // // Delete blog
-// blogRoutes.delete('/blogs/:slug', blogController.deleteBlog);
+// blogRoutes.delete('/:slug', userAuthentication, blogController.deleteBlog);
 
-// blogRoutes.post('/:slug/like', blogController.likeBlog);
-         
-// // NEW: Comments endpoints
+// // ========================================
+// // ✅ LIKE/COMMENT ROUTES - Specific paths before :slug
+// // ========================================
+
+// // Like blog - Protected
+// blogRoutes.post('/:slug/like', userAuthentication, blogController.likeBlog);
+
+// // Get comments for blog - Public
 // blogRoutes.get('/:slug/comments', blogController.getComments);
-// blogRoutes.post('/:slug/comments', blogController.addComment);
-// blogRoutes.delete('/:slug/comments/:commentId', blogController.deleteComment);
 
-// module.exports = blogRoutes; 
+// // Add comment - Protected
+// blogRoutes.post('/:slug/comments', userAuthentication, blogController.addComment);
+
+// // Delete comment - Protected
+// blogRoutes.delete('/:slug/comments/:commentId', userAuthentication, blogController.deleteComment);
+
+// module.exports = blogRoutes;
 
 
 
 const express = require('express');
-const router = express.Router();
 const blogController = require('../controllers/blogController');
 const upload = require('../middlewares/cloudinary');
 const userAuthentication = require("../middlewares/userAuthentication");
+
 const blogRoutes = express.Router();
 
-// Create new blog (with multiple image uploads - main image + section images)
-blogRoutes.post('/blogs', userAuthentication, upload.fields([
+// ========================================
+// ✅ CREATE BLOG - Protected with file uploads
+// ========================================
+// Create new blog (route: POST /blogs)
+blogRoutes.post('/', userAuthentication, upload.fields([
   { name: 'image', maxCount: 1 },
   { name: 'sectionImage_0', maxCount: 1 },
   { name: 'sectionImage_1', maxCount: 1 },
@@ -70,36 +80,49 @@ blogRoutes.post('/blogs', userAuthentication, upload.fields([
   { name: 'sectionImage_9', maxCount: 1 },
 ]), blogController.createBlog);
 
-// ✅ IMPORTANT: Static routes MUST come before dynamic :slug route
-// Get latest blogs
-blogRoutes.get('/blogs/latest', blogController.getLatestBlogs);
+// ========================================
+// ✅ STATIC ROUTES - MUST come FIRST
+// These are specific paths that should not be confused with :slug
+// ========================================
 
 // Get stats
-blogRoutes.get('/blogs/stats', blogController.getStats);
+blogRoutes.get('/stats', blogController.getStats);
 
-// List all blogs
-blogRoutes.get('/blogs', blogController.listBlogs);
+// Get latest blogs
+blogRoutes.get('/latest', blogController.getLatestBlogs);
 
-// ✅ DYNAMIC ROUTES - These come LAST
+// Get all blogs (with filtering)
+blogRoutes.get('/', blogController.getBlogs);
+
+// ========================================
+// ✅ NESTED ROUTES - MUST come BEFORE :slug
+// Specific paths with :slug param in path (like /:slug/comments)
+// ========================================
+
+// Like blog - Protected
+blogRoutes.post('/:slug/like', userAuthentication, blogController.likeBlog);
+
+// Get comments for blog - Public
+blogRoutes.get('/:slug/comments', blogController.getComments);
+
+// Add comment - Protected
+blogRoutes.post('/:slug/comments', userAuthentication, blogController.addComment);
+
+// Delete comment - Protected
+blogRoutes.delete('/:slug/comments/:commentId', userAuthentication, blogController.deleteComment);
+
+// ========================================
+// ✅ DYNAMIC ROUTES - MUST come LAST
+// :slug will match any path, so must be after all specific routes
+// ========================================
+
 // Get single blog by slug
-blogRoutes.get('/blogs/:slug', blogController.getBlogBySlug);
+blogRoutes.get('/:slug', blogController.getBlogBySlug);
 
 // Update blog
-blogRoutes.patch('/blogs/:slug', blogController.updateBlog);
+blogRoutes.put('/:slug', userAuthentication, blogController.updateBlog);
 
 // Delete blog
-blogRoutes.delete('/blogs/:slug', blogController.deleteBlog);
-
-// ✅ LIKE BLOG - Protected (specific route before :slug)
-blogRoutes.post('/blogs/:slug/like', userAuthentication, blogController.likeBlog);
-
-// ✅ ADD COMMENT - Protected (specific route before :slug)
-blogRoutes.post('/blogs/:slug/comments', userAuthentication, blogController.addComment);
-
-// ✅ DELETE COMMENT - Protected (specific route before :slug)
-blogRoutes.delete('/blogs/:slug/comments/:commentId', userAuthentication, blogController.deleteComment);
-
-// ✅ GET COMMENTS - Public (specific route before :slug)
-blogRoutes.get('/blogs/:slug/comments', blogController.getComments);
+blogRoutes.delete('/:slug', userAuthentication, blogController.deleteBlog);
 
 module.exports = blogRoutes;

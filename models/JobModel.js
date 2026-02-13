@@ -8,7 +8,11 @@ const jobSchema = new mongoose.Schema(
     icon: String,
     department: String,
     company: String,
-
+    createdAt: Date,
+    publishedAt: {
+      type: Date,
+      default: Date.now,
+    },
     location: String,
     employment: String, // Full-Time | Internship
 
