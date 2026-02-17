@@ -7,7 +7,7 @@ const errorHandler = require("./middlewares/errorHandler");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const app = express();
-
+const helmet = require("helmet");
 connectDB().then(() => {
   // start cron jobs (newsletter, etc.) AFTER DB is connected
   require("./cron/newsletterCron");
@@ -28,7 +28,7 @@ app.use(
     credentials: true,
   })
 );
-
+app.use(helmet());
 app.use(express.json());
 app.use(cookieParser())
 

@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Blog = require('../models/blogModel');
+const generateSitemaps = require('../scripts/generateSitemaps');
 const expressAsyncHandler = require('express-async-handler');
 const {
   addComment,
@@ -131,6 +132,8 @@ const blogController = {
       });
 
       const saved = await newBlog.save();
+      // regenerate sitemaps in background
+      generateSitemaps().catch(err => console.error('sitemap generation failed after create:', err));
       return res.status(201).json({ success: true, data: saved });
     } catch (err) {
       console.error('createBlog error', err);
@@ -268,6 +271,9 @@ const blogController = {
       }).lean();
       if (!updated) return sendError(res, 404, 'Blog not found');
 
+      // regenerate sitemaps in background
+      generateSitemaps().catch(err => console.error('sitemap generation failed after update:', err));
+
       return res.json({ success: true, data: updated });
     } catch (err) {
       console.error('updateBlog error', err);
@@ -282,6 +288,9 @@ const blogController = {
 
       const removed = await Blog.findOneAndDelete({ slug }).lean();
       if (!removed) return sendError(res, 404, 'Blog not found');
+
+      // regenerate sitemaps in background
+      generateSitemaps().catch(err => console.error('sitemap generation failed after delete:', err));
 
       return res.json({ success: true, data: removed });
     } catch (err) {
