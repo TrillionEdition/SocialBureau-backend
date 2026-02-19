@@ -1,12 +1,14 @@
 const express = require('express');
 const eventController = require('../controllers/eventController');
 const upload = require('../middlewares/cloudinary');
+const userAuthentication = require("../middlewares/userAuthentication");
+const isAdmin = require("../middlewares/isAdmin");
 
 const eventRoutes = express.Router();
 
 // Create new event
 // Create new event (supports file upload: field name 'image')
-eventRoutes.post('/add', upload.single('image'), eventController.createEvent);
+eventRoutes.post('/add', userAuthentication, isAdmin, upload.single('image'), eventController.createEvent);
 
 // Get all events (with filters)
 eventRoutes.get('/list', eventController.getEvents);
@@ -18,10 +20,10 @@ eventRoutes.get('/upcoming', eventController.getUpcomingEvents);
 eventRoutes.get('/:id', eventController.getEventById);
 
 // Update event
-eventRoutes.patch('/:id', eventController.updateEvent);
+eventRoutes.patch('/:id', userAuthentication, isAdmin, eventController.updateEvent);
 
 // Delete event
-eventRoutes.delete('/:id', eventController.deleteEvent);
+eventRoutes.delete('/:id', userAuthentication, isAdmin, eventController.deleteEvent);
 
 // Generate calendar file for event
 eventRoutes.get('/:id/calendar', eventController.generateCalendarFile);

@@ -59,6 +59,7 @@ const express = require('express');
 const blogController = require('../controllers/blogController');
 const upload = require('../middlewares/cloudinary');
 const userAuthentication = require("../middlewares/userAuthentication");
+const isAdmin = require("../middlewares/isAdmin");
 
 const blogRoutes = express.Router();
 
@@ -66,7 +67,7 @@ const blogRoutes = express.Router();
 // ✅ CREATE BLOG - Protected with file uploads
 // ========================================
 // Create new blog (route: POST /blogs)
-blogRoutes.post('/', userAuthentication, upload.fields([
+blogRoutes.post('/', userAuthentication, isAdmin, upload.fields([
   { name: 'image', maxCount: 1 },
   { name: 'sectionImage_0', maxCount: 1 },
   { name: 'sectionImage_1', maxCount: 1 },
@@ -120,9 +121,9 @@ blogRoutes.delete('/:slug/comments/:commentId', userAuthentication, blogControll
 blogRoutes.get('/:slug', blogController.getBlogBySlug);
 
 // Update blog
-blogRoutes.put('/:slug', userAuthentication, blogController.updateBlog);
+blogRoutes.put('/:slug', userAuthentication, isAdmin, blogController.updateBlog);
 
 // Delete blog
-blogRoutes.delete('/:slug', userAuthentication, blogController.deleteBlog);
+blogRoutes.delete('/:slug', userAuthentication, isAdmin, blogController.deleteBlog);
 
 module.exports = blogRoutes;
