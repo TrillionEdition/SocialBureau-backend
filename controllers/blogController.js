@@ -137,6 +137,10 @@ const blogController = {
       return res.status(201).json({ success: true, data: saved });
     } catch (err) {
       console.error('createBlog error', err);
+      if (err.name === 'ValidationError') {
+        const messages = Object.values(err.errors).map(val => val.message);
+        return sendError(res, 400, 'Validation Error', messages.join(', '));
+      }
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),
@@ -277,6 +281,10 @@ const blogController = {
       return res.json({ success: true, data: updated });
     } catch (err) {
       console.error('updateBlog error', err);
+      if (err.name === 'ValidationError') {
+        const messages = Object.values(err.errors).map(val => val.message);
+        return sendError(res, 400, 'Validation Error', messages.join(', '));
+      }
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),

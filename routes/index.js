@@ -11,6 +11,7 @@ const companyAchievementRoutes = require("./companyAchievementRoutes");
 // const paymentRoutes = require("./paymentRoutes");
 const jobRoutes = require("./jobRoutes");
 const clientReviewRoutes = require('./clientReviewRoutes');
+const atsRoutes = require("./ats");
 
 const router = express.Router();
 
@@ -28,5 +29,7 @@ router.use("/achievement", achievementRoutes);
 router.use("/company-achievement", companyAchievementRoutes);
 router.use('/client-reviews', clientReviewRoutes);
 // router.use("/payment", paymentRoutes);
+router.use('/ats', atsRoutes);
+
 
 module.exports = router;

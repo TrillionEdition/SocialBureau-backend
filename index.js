@@ -4,6 +4,7 @@ const cors = require("cors");
 const connectDB = require("./database/connectDB");
 const router = require("./routes");
 const errorHandler = require("./middlewares/errorHandler");
+const atsRouter = require("./routes/ats");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const app = express();
@@ -56,6 +57,7 @@ app.use(
 //   })
 // )
 
+app.use('/api/ats', atsRouter);
 app.use('/', router);
 app.use(errorHandler)
 
