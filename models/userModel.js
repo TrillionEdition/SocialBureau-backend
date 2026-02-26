@@ -79,6 +79,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
+      default: "partnership",
     },
     rating: {
       type: Number

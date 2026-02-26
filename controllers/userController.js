@@ -242,6 +242,8 @@ const userController = {
       email: userCreated.email,
       id: userCreated._id || userCreated.id,
       name: userCreated.name,
+      role: userCreated.role,
+      verification: userCreated.verification,
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, { expiresIn: '2d' });
@@ -257,7 +259,12 @@ const userController = {
 
     res.status(201).json({
       message: 'User created successfully',
-      user: { id: userCreated._id || userCreated.id, email: userCreated.email, name: userCreated.name },
+      user: { 
+        id: userCreated._id || userCreated.id, 
+        email: userCreated.email, 
+        name: userCreated.name,
+        role: userCreated.role,
+      },
     });
   }),
 
