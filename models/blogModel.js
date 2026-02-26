@@ -74,13 +74,13 @@ const blogSchema = new mongoose.Schema(
         message: "content must be a non-empty array of content sections",
       },
     },
-// meta: {
-//   views: { type: Number, default: 0 },
-//   likes: { type: Number, default: 0 },
-//   shares: { type: Number, default: 0 },
-// },
-comments: [
-        {
+    // meta: {
+    //   views: { type: Number, default: 0 },
+    //   likes: { type: Number, default: 0 },
+    //   shares: { type: Number, default: 0 },
+    // },
+    comments: [
+      {
         _id: {
           type: mongoose.Schema.Types.ObjectId,
           default: () => new mongoose.Types.ObjectId(),
@@ -103,7 +103,7 @@ comments: [
           default: Date.now,
         },
       },
-],
+    ],
 
     authorName: {
       type: String,
@@ -154,15 +154,15 @@ comments: [
       title: {
         type: String,
         trim: true,
-        maxlength: 60,
+        maxlength: 200,
       },
       description: {
         type: String,
         trim: true,
-        maxlength: 160,
+        maxlength: 500,
       },
     },
-    
+
   },
   {
     timestamps: true,

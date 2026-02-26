@@ -62,6 +62,20 @@ const userController = {
 
     console.log("Final toolsInput after parsing:", toolsInput);
 
+    // Handle Clients Input parsing
+    let clientsInput = req.body.clients;
+    if (typeof clientsInput === 'string') {
+      try {
+        clientsInput = JSON.parse(clientsInput);
+      } catch (err) {
+        clientsInput = [];
+      }
+    }
+    if (!Array.isArray(clientsInput)) {
+      clientsInput = clientsInput ? [clientsInput] : [];
+    }
+
+
     const coverFile = req.files?.coverImage?.[0];
     const idCardFile = req.files?.idCard?.[0];
 
@@ -154,6 +168,42 @@ const userController = {
 
     console.log("Final toolIds to save:", toolIds);
 
+    // Process Clients
+    const clientIds = [];
+    for (const clientData of clientsInput) {
+      const { name, companyName, email, phone, website, logo, status, notes } = clientData || {};
+      if (!name) continue;
+
+      const idQuery = {
+        $or: [
+          email ? { email } : null,
+          website ? { website } : null,
+          { name }
+        ].filter(Boolean)
+      };
+
+      const client = await Client.findOneAndUpdate(
+        idQuery,
+        {
+          $set: {
+            name,
+            companyName: companyName ?? "",
+            email: email ?? "",
+            phone: phone ?? "",
+            website: website ?? "",
+            logo: logo ?? "",
+            notes: notes ?? "",
+            status: status ?? "active",
+          }
+        },
+        { new: true, upsert: true }
+      );
+      clientIds.push(client._id);
+    }
+    const uniqueClientIds = [...new Set(clientIds.map(id => id.toString()))];
+
+
+
     const hashed_password = await bcrypt.hash(password, 10);
     const now = new Date();
     const joinDate = new Date(doj);
@@ -187,7 +237,10 @@ const userController = {
       idCard: idCardUrl,
       exp,
       tools: toolIds,
+      clients: uniqueClientIds,
     });
+
+
 
     if (!userCreated) {
       res.status(500);
@@ -243,7 +296,6 @@ const userController = {
       id: userCreated._id || userCreated.id,
       name: userCreated.name,
       role: userCreated.role,
-      verification: userCreated.verification,
     };
 
     const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, { expiresIn: '2d' });
@@ -646,11 +698,11 @@ const userController = {
       user.exp = req.body.exp || user.exp;
       user.doj = req.body.doj || user.doj;
       user.emp_id = req.body.emp_id || user.emp_id;
-      user.clickupId = req.body.clickupId || user.clickupId;
-      
-      if (req.body.isEmployee !== undefined) {
-        user.isEmployee = req.body.isEmployee;
-      }
+      // user.clickupId = req.body.clickupId || user.clickupId;
+
+      // if (req.body.isEmployee !== undefined) {
+      //   user.isEmployee = req.body.isEmployee;
+      // }
 
       // Handle Tools Update
       if (req.body.tools) {
@@ -719,19 +771,71 @@ const userController = {
             throw err;
           }
         }));
-        
+
         user.tools = toolIds;
       }
+      //new
+      // Handle Clients Update
+      if (req.body.clients) {
+        let clientsInput = req.body.clients;
+        if (typeof clientsInput === 'string') {
+          try {
+            clientsInput = JSON.parse(clientsInput);
+          } catch (err) {
+            clientsInput = [];
+          }
+        }
+        if (!Array.isArray(clientsInput)) clientsInput = clientsInput ? [clientsInput] : [];
+
+        const clientIds = [];
+        for (const clientData of clientsInput) {
+          const { name, companyName, email, phone, website, logo, status, notes } = clientData || {};
+          if (!name) continue;
+
+          const idQuery = {
+            $or: [
+              email ? { email } : null,
+              website ? { website } : null,
+              { name }
+            ].filter(Boolean)
+          };
+
+          const client = await Client.findOneAndUpdate(
+            idQuery,
+            {
+              $set: {
+                name,
+                companyName: companyName ?? "",
+                email: email ?? "",
+                phone: phone ?? "",
+                website: website ?? "",
+                logo: logo ?? "",
+                notes: notes ?? "",
+                status: status ?? "active",
+              }
+            },
+            { new: true, upsert: true }
+          );
+          clientIds.push(client._id);
+        }
+        user.clients = [...new Set(clientIds.map(id => id.toString()))];
+      }
+
+
 
       // Handle file uploads
       const coverFile = req.files?.coverImage?.[0];
       const idCardFile = req.files?.idCard?.[0];
+      const avatarFile = req.files?.avatar?.[0]; // New
 
       if (coverFile) {
         user.coverImage = getUrlFromFile(coverFile);
       }
       if (idCardFile) {
         user.idCard = getUrlFromFile(idCardFile);
+      }
+      if (avatarFile) {
+        user.avatar = getUrlFromFile(avatarFile);
       }
 
       if (req.body.password) {
@@ -746,10 +850,95 @@ const userController = {
         email: updatedUser.email,
         role: updatedUser.role,
         isEmployee: updatedUser.isEmployee,
+        // Return new fields
+        title: updatedUser.title,
+        bio: updatedUser.bio,
+        location: updatedUser.location,
+        avatar: updatedUser.avatar,
+        coverImage: updatedUser.coverImage,
       });
     } else {
       res.status(404);
       throw new Error("User not found");
+    }
+  }),
+
+  updateClient: asyncHandler(async (req, res) => {
+    try {
+      const { userId, clients } = req.body;
+
+      if (!userId || !Array.isArray(clients)) {
+        return res.status(400).json({
+          success: false,
+          message: "userId and clients[] are required",
+        });
+      }
+
+      const clientIds = [];
+
+      for (const clientData of clients) {
+        const { name, companyName, email, phone, website, logo, status, notes } = clientData || {};
+        if (!name) {
+          return res.status(400).json({
+            success: false,
+            message: "Client name is required for each client",
+          });
+        }
+
+        const idQuery = {
+          $or: [
+            email ? { email } : null,
+            website ? { website } : null,
+            { name }
+          ].filter(Boolean)
+        };
+
+        const client = await Client.findOneAndUpdate(
+          idQuery,
+          {
+            $set: {
+              name,
+              companyName: companyName ?? "",
+              email: email ?? "",
+              phone: phone ?? "",
+              website: website ?? "",
+              logo: logo ?? "",
+              notes: notes ?? "",
+              status: status ?? "active",
+            }
+          },
+          { new: true, upsert: true }
+        );
+
+        clientIds.push(client._id);
+      }
+
+      const uniqueIds = [...new Set(clientIds.map(String))];
+
+      const updatedUser = await User.findByIdAndUpdate(
+        userId,
+        { $addToSet: { clients: { $each: uniqueIds } } },
+        { new: true }
+      ).populate("clients");
+
+      if (!updatedUser) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Clients updated successfully",
+        data: updatedUser,
+      });
+    } catch (error) {
+      console.error("Error updating clients", error);
+      return res.status(500).json({
+        success: false,
+        message: "Internal server error",
+      });
     }
   }),
 

@@ -4,10 +4,11 @@ const cors = require("cors");
 const connectDB = require("./database/connectDB");
 const router = require("./routes");
 const errorHandler = require("./middlewares/errorHandler");
+const atsRouter = require("./routes/ats");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const app = express();
-
+const helmet = require("helmet");
 connectDB().then(() => {
   // start cron jobs (newsletter, etc.) AFTER DB is connected
   require("./cron/newsletterCron");
@@ -29,7 +30,7 @@ app.use(
     credentials: true,
   })
 );
-
+app.use(helmet());
 app.use(express.json());
 app.use(cookieParser())
 
@@ -57,6 +58,7 @@ app.use(
 //   })
 // )
 
+app.use('/api/ats', atsRouter);
 app.use('/', router);
 app.use(errorHandler)
 

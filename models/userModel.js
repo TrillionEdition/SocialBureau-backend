@@ -98,6 +98,18 @@ const userSchema = new mongoose.Schema(
     },
 
     // === Engagement & Leaderboard (SAFE ADDITION) ===
+    avatar: {
+      type: String,
+    },
+    bio: {
+      type: String,
+    },
+    title: {
+      type: String, // e.g. "Senior Developer"
+    },
+    location: {
+      type: String, // e.g. "New York, USA"
+    },
     points: {
       type: Number,
       default: 0,
