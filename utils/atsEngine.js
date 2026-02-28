@@ -1366,11 +1366,14 @@ const SUPPORTED_TYPES = ['application/pdf', ...SUPPORTED_IMAGE_TYPES];
 const SECTIONS_REGEX = {
     Experience: /(experience|work history|employment history|professional experience|background|career history)/i,
     Education: /(education|academic background|qualifications|degree|university|college)/i,
-    Skills: /(skills|technical skills|competencies|expertise|proficiencies|abilities)/i,
+    Skills: /(skills|technical skills|competencies|expertise|proficiencies|abilities|tools)/i,
     Summary: /(summary|objective|professional profile|about me|overview|profile)/i,
     Certifications: /(certifications|licenses|awards|courses|accreditations|credentials)/i,
-    Projects: /(projects|personal projects|portfolio|academic projects|case studies|work samples)/i,
+    Projects: /(projects|personal projects|portfolio|academic projects|case studies|work samples|gallery|showreel)/i,
 };
+
+// ─── Portfolio & Contact Detection ───────────────────────────────────────────
+const PORTFOLIO_REGEX = /(behance\.net|dribbble\.com|github\.com|portfolio|linkedin\.com\/in|instagram\.com|youtube\.com|vimeo\.com|artstation\.com|personal website|linktr\.ee)/i;
 
 // ─── Text Extraction ──────────────────────────────────────────────────────────
 const extractTextFromPDF = async (buffer) => {
@@ -1399,11 +1402,6 @@ const extractTextFromFile = async (buffer, mimetype) => {
 };
 
 // ─── Strict Noise Filter ──────────────────────────────────────────────────────
-// A word/phrase is noise if it:
-//   - starts with a pronoun/article/possessive (my, a, an, the, our, your, his, her)
-//   - contains punctuation other than hyphens, dots, +, #
-//   - is a known generic/hollow word
-//   - is shorter than 3 chars
 const PRONOUNS_ARTICLES = new Set([
     'a', 'an', 'the', 'my', 'your', 'our', 'their', 'his', 'her', 'its', 'this', 'that',
     'these', 'those', 'some', 'any', 'all', 'both', 'each', 'no', 'every',
@@ -1436,21 +1434,60 @@ const GENERIC_WORDS = new Set([
     'full', 'time', 'part', 'etc', 'coding', 'abilities', 'opportunity', 'interest',
 ]);
 
+// Creative specific words that should skip the noise filter
+const CREATIVE_EXCEPTIONS = new Set([
+    'seo', 'sem', 'ppc', 'crm', 'ui', 'ux', 'ai', 'pr', 'hr', 'ads', 'vfx', 'cgi', '3d', '2d',
+    'logo', 'brand', 'copy', 'blog', 'social', 'media', 'video', 'photo', 'web', 'dev', 'app',
+    'email', 'content', 'growth', 'digital', 'search', 'engine', 'marketing', 'design', 'layout'
+]);
+
+const ACTION_VERBS = new Set([
+    'accelerated', 'achieved', 'analyzed', 'authored', 'budgeted', 'calculated', 'centralized',
+    'clarified', 'collaborated', 'composed', 'constructed', 'converted', 'created', 'debugged',
+    'delivered', 'designed', 'detected', 'developed', 'devised', 'directed', 'distributed',
+    'documented', 'drafted', 'edited', 'eliminated', 'enabled', 'engineered', 'enhanced',
+    'established', 'executed', 'expanded', 'expedited', 'fabricated', 'facilitated', 'finalized',
+    'formulated', 'generated', 'guided', 'handled', 'identified', 'implemented', 'improved',
+    'increased', 'initiated', 'inspected', 'installed', 'integrated', 'invented', 'launched',
+    'led', 'localized', 'managed', 'marketed', 'maximized', 'mediated', 'mentored', 'minimized',
+    'mobilized', 'modeled', 'monitored', 'motivated', 'negotiated', 'optimized', 'organized',
+    'originated', 'overhauled', 'oversaw', 'performed', 'pioneered', 'planned', 'polished',
+    'predicted', 'prioritized', 'processed', 'produced', 'programmed', 'projected', 'promoted',
+    'published', 'purchased', 'recorded', 'recruited', 'redesigned', 'reduced', 'refined',
+    'regulated', 'rehabilitated', 'remodeled', 'reorganized', 'repaired', 'replaced', 'reported',
+    'represented', 'researched', 'resolved', 'restored', 'restructured', 'retrieved', 'reviewed',
+    'revitalized', 'scheduled', 'scanned', 'selected', 'serviced', 'simplified', 'simulated',
+    'sketched', 'solved', 'spearheaded', 'specialized', 'standardized', 'stimulated', 'strategized',
+    'streamlined', 'strengthened', 'structured', 'studied', 'supervised', 'supported', 'surveyed',
+    'synthesized', 'tabulated', 'taught', 'trained', 'transformed', 'translated', 'upgraded',
+    'validated', 'visualized', 'wrote'
+]);
+
+const SOFT_SKILLS = new Set([
+    'leadership', 'communication', 'teamwork', 'problem-solving', 'critical thinking',
+    'adaptability', 'flexibility', 'time management', 'work ethic', 'conflict resolution',
+    'emotional intelligence', 'creativity', 'mentoring', 'collaboration', 'presentation',
+    'public speaking', 'negotiation', 'networking', 'patience', 'empathy', 'integrity'
+]);
+
+
 /**
  * Returns true if a phrase should be rejected as noise.
- * Applied to both keywords and skills.
  */
 const isNoise = (phrase) => {
     if (!phrase) return true;
     const p = phrase.trim().toLowerCase();
 
+    // Creative exceptions allow shorter terms like "seo", "ui", "ux", "hr"
+    if (CREATIVE_EXCEPTIONS.has(p)) return false;
+
     // Too short
     if (p.length <= 2) return true;
 
-    // Contains punctuation other than - . + # / (e.g. commas, quotes, parens)
+    // Contains punctuation other than - . + # /
     if (/[,;:'"()[\]{}!?@$%^&*=<>]/.test(p)) return true;
 
-    // Starts with a pronoun, article, or possessive (catches "my skills", "a student", "an opportunity")
+    // Starts with a pronoun, article, or possessive
     const firstWord = p.split(/\s+/)[0];
     if (PRONOUNS_ARTICLES.has(firstWord)) return true;
 
@@ -1460,29 +1497,30 @@ const isNoise = (phrase) => {
     // Purely numeric
     if (/^\d+$/.test(p)) return true;
 
-    // Ends with a possessive ('s)
-    if (p.endsWith("'s") || p.endsWith("s'")) return true;
-
     return false;
 };
 
-// ─── Keyword Extraction (stemmed, noun-only) ──────────────────────────────────
-// Extracts meaningful single words only — stopword filtered + noise filtered + stemmed
+// ─── Keyword Extraction ───────────────────────────────────────────────────────
 const extractKeywords = (text) => {
     if (!text) return [];
     const tokens = tokenizer.tokenize(text.toLowerCase());
     const filtered = stopword.removeStopwords(tokens)
-        .filter((w) => w.length > 2 && !isNoise(w) && !GENERIC_WORDS.has(w));
+        .filter((w) => {
+            if (CREATIVE_EXCEPTIONS.has(w)) return true;
+            return w.length > 2 && !isNoise(w) && !GENERIC_WORDS.has(w);
+        });
     const stemmed = filtered.map((w) => PorterStemmer.stem(w));
     return [...new Set(stemmed)];
 };
 
-// Stem → best surface word map for readable display
 const buildStemMap = (text) => {
     if (!text) return {};
     const tokens = tokenizer.tokenize(text.toLowerCase());
     const filtered = stopword.removeStopwords(tokens)
-        .filter((w) => !isNoise(w) && !GENERIC_WORDS.has(w));
+        .filter((w) => {
+            if (CREATIVE_EXCEPTIONS.has(w)) return true;
+            return !isNoise(w) && !GENERIC_WORDS.has(w);
+        });
     const map = {};
     filtered.forEach((word) => {
         const stem = PorterStemmer.stem(word);
@@ -1492,43 +1530,31 @@ const buildStemMap = (text) => {
 };
 
 // ─── Skill Extraction ─────────────────────────────────────────────────────────
-// Extracts ONLY clean, concrete skill tokens from the JD.
-// Strategy:
-//   1. Find clean 1-3 word phrases using strict regex patterns (no pronouns, no punctuation)
-//   2. Validate each phrase actually appears verbatim in the JD
-//   3. Score by TF-IDF to surface the most important ones
-//   4. Apply noise filter to remove anything hollow
 const extractDynamicSkills = (text) => {
     if (!text) return [];
     const lower = text.toLowerCase();
 
-    // Pattern: a skill token is 1–3 words where:
-    //   - each word is alphanumeric (allows hyphens, +, #, .)
-    //   - no word is a pronoun/article/possessive
-    //   - no commas or other punctuation
-    // We scan every possible 1, 2, and 3-word window from the text.
+    // Scan every possible 1, 2, and 3-word window
     const wordTokens = lower.match(/\b[a-z][a-z0-9+#.\-]*\b/g) || [];
-
     const candidates = new Set();
 
     for (let i = 0; i < wordTokens.length; i++) {
         const w1 = wordTokens[i];
-        if (isNoise(w1) || GENERIC_WORDS.has(w1) || PRONOUNS_ARTICLES.has(w1)) continue;
-        if (w1.length < 3) continue;
+        if (!CREATIVE_EXCEPTIONS.has(w1)) {
+            if (isNoise(w1) || GENERIC_WORDS.has(w1) || PRONOUNS_ARTICLES.has(w1)) continue;
+        }
 
-        // Single word candidate
         candidates.add(w1);
 
         if (i + 1 < wordTokens.length) {
             const w2 = wordTokens[i + 1];
-            if (!isNoise(w2) && !PRONOUNS_ARTICLES.has(w2) && w2.length >= 2) {
+            if (CREATIVE_EXCEPTIONS.has(w2) || (!isNoise(w2) && !PRONOUNS_ARTICLES.has(w2))) {
                 const bigram = `${w1} ${w2}`;
-                // Must exist verbatim in original text
                 if (lower.includes(bigram)) candidates.add(bigram);
 
                 if (i + 2 < wordTokens.length) {
                     const w3 = wordTokens[i + 2];
-                    if (!isNoise(w3) && !PRONOUNS_ARTICLES.has(w3) && w3.length >= 2) {
+                    if (CREATIVE_EXCEPTIONS.has(w3) || (!isNoise(w3) && !PRONOUNS_ARTICLES.has(w3))) {
                         const trigram = `${w1} ${w2} ${w3}`;
                         if (lower.includes(trigram)) candidates.add(trigram);
                     }
@@ -1537,29 +1563,27 @@ const extractDynamicSkills = (text) => {
         }
     }
 
-    // Score candidates by TF-IDF and apply final noise filter
     const tfidf = new TfIdf();
     tfidf.addDocument(lower);
 
     const scored = [];
     candidates.forEach((phrase) => {
-        if (isNoise(phrase)) return;
-        // For multi-word, score by first word's TF-IDF
+        if (isNoise(phrase) && !CREATIVE_EXCEPTIONS.has(phrase)) return;
         const firstWord = phrase.split(' ')[0];
         let score = 0;
         tfidf.listTerms(0).forEach(({ term, tfidf: s }) => {
             if (term === firstWord) score = s;
         });
-        // Boost multi-word phrases — they are more specific
         if (phrase.includes(' ')) score *= 1.5;
+        // Boost creative terms
+        if (phrase.split(' ').some(w => CREATIVE_EXCEPTIONS.has(w))) score *= 1.2;
         scored.push({ phrase, score });
     });
 
-    // Sort by score, return top 30 most relevant
     return scored
         .sort((a, b) => b.score - a.score)
         .map((s) => s.phrase)
-        .slice(0, 30);
+        .slice(0, 40);
 };
 
 // ─── Match Skills ─────────────────────────────────────────────────────────────
@@ -1589,36 +1613,110 @@ const detectSections = (text) => {
 const checkFormatting = (text) => {
     let score = 100;
     const wordCount = text.trim().split(/\s+/).length;
-    if (wordCount < 300 || wordCount > 800) score -= 20;
+    // For creative roles, resumes can be shorter or more portfolio-focused
+    if (wordCount < 150) score -= 20;
+    if (wordCount > 1000) score -= 15;
+
     const specialChars = text.match(/[^a-zA-Z0-9\s]/g) || [];
-    if (specialChars.length / text.length > 0.05) score -= 15;
-    if ((text.match(/\|/g) || []).length > 5) score -= 15;
+    // Creatives use more symbols (social icons, separators)
+    if (specialChars.length / text.length > 0.08) score -= 10;
+
+    if ((text.match(/\|/g) || []).length > 15) score -= 10;
+
     const breaks = (text.match(/\n/g) || []).length;
-    if (breaks > 10 && breaks < 100) score += 5;
+    if (breaks > 5) score += 5;
+
     return Math.max(0, Math.min(100, score));
 };
 
 // ─── Suggestions ──────────────────────────────────────────────────────────────
 const generateSuggestions = (result) => {
     const suggestions = [];
-    const { subScores, sectionChecklist, missingKeywords, skillGaps } = result;
+    const { subScores, sectionChecklist, missingKeywords, skillGaps, hasPortfolio } = result;
+
     if (subScores.keywordMatch < 50)
-        suggestions.push('Tailor your resume more specifically to this role — mirror the exact language from the job description.');
+        suggestions.push('Tailor your resume more specifically by mirroring the exact creative tools and skills mentioned.');
+
     if (missingKeywords.length > 3)
-        suggestions.push(`Incorporate these missing keywords naturally: ${missingKeywords.slice(0, 5).join(', ')}.`);
+        suggestions.push(`Try to include these missing terms: ${missingKeywords.slice(0, 5).join(', ')}.`);
+
     if (!sectionChecklist.Summary)
-        suggestions.push('Add a concise professional summary at the top of your resume.');
-    if (!sectionChecklist.Projects)
-        suggestions.push('Add a Projects section to showcase relevant hands-on work.');
-    if (!sectionChecklist.Certifications)
-        suggestions.push('Consider adding relevant certifications or courses to strengthen your profile.');
+        suggestions.push('Add a short professional bio or summary that highlights your creative USP.');
+
+    if (!sectionChecklist.Projects && !hasPortfolio)
+        suggestions.push('Crucial: Add a Portfolio link or Projects section to showcase your work.');
+
     if (skillGaps.length > 0)
-        suggestions.push(`Address these skill gaps from the job description: ${skillGaps.slice(0, 5).join(', ')}.`);
+        suggestions.push(`Addressing these core requirements could boost your match: ${skillGaps.slice(0, 5).join(', ')}.`);
+
     if (subScores.formatting < 60)
-        suggestions.push('Keep your resume between 300–800 words and avoid tables, pipes, and excessive special characters.');
-    if (subScores.sectionCompleteness < 60)
-        suggestions.push('Ensure your resume has clearly labelled sections: Summary, Experience, Education, Skills, and Projects.');
+        suggestions.push('Ensure your layout is clean and readable by ATS; avoid highly complex multi-column tables.');
+
+    if (!hasPortfolio) {
+        suggestions.push('Pro-tip: Adding links to Behance, Dribbble, or a personal gallery is highly recommended for this role.');
+    }
+
+    if (result.actionVerbCount < 5) {
+        suggestions.push('Use more powerful action verbs (e.g., Spearheaded, Optimized, Orchestrated) to describe your impact.');
+    }
+
+    if (!result.contactInfo.email || !result.contactInfo.phone) {
+        suggestions.push('Make sure both your email and phone number are clearly visible on your resume.');
+    }
+
     return [...new Set(suggestions)];
+};
+
+const detectContactInfo = (text) => {
+    const email = (text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/) || [])[0] || null;
+    const phone = (text.match(/(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/) || [])[0] || null;
+    return { email, phone };
+};
+
+const analyzeActionVerbs = (text) => {
+    const tokens = tokenizer.tokenize(text.toLowerCase());
+    const found = tokens.filter(t => ACTION_VERBS.has(t));
+    return {
+        count: found.length,
+        verbs: [...new Set(found)].slice(0, 10)
+    };
+};
+
+const analyzeSoftSkills = (resumeText, jdText) => {
+    const lowerResume = resumeText.toLowerCase();
+    const lowerJd = jdText.toLowerCase();
+
+    const matched = [];
+    const missing = [];
+
+    SOFT_SKILLS.forEach(skill => {
+        const inJd = lowerJd.includes(skill);
+        const inResume = lowerResume.includes(skill);
+
+        if (inJd && inResume) matched.push(skill);
+        else if (inJd && !inResume) missing.push(skill);
+    });
+
+    return { matched, missing };
+};
+
+// ─── Experience & Internship Detection ───────────────────────────────────────
+const extractExperienceYears = (text) => {
+    const yearsMatch = text.match(/(\d+)\+?\s*years?\s*(?:of\s*)?experience/i);
+    return yearsMatch ? parseInt(yearsMatch[1]) : 0;
+};
+
+const extractInternships = (text) => {
+    const internships = [];
+    // Look for "Intern" followed by some words (likely company name)
+    const regex = /(?:intern(?:ship)?)\s+(?:at|with|in)?\s*([A-Z][a-zA-Z0-9&.\s]{2,30})(?=\s|\n|$)/gi;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+        if (!GENERIC_WORDS.has(match[1].toLowerCase().trim())) {
+            internships.push(match[1].trim());
+        }
+    }
+    return [...new Set(internships)];
 };
 
 // ─── Main Scoring ─────────────────────────────────────────────────────────────
@@ -1639,25 +1737,73 @@ const calculateScore = (resumeText, jobDescription) => {
     const sectionChecklist = detectSections(resumeText);
     const formattingScore = checkFormatting(resumeText);
 
+    // Portfolio Check
+    const hasPortfolio = PORTFOLIO_REGEX.test(resumeText);
+
+    // New: Experience & Internship Check
+    const expYears = extractExperienceYears(resumeText);
+    const internships = extractInternships(resumeText);
+    const contactInfo = detectContactInfo(resumeText);
+    const actionVerbs = analyzeActionVerbs(resumeText);
+    const softSkills = analyzeSoftSkills(resumeText, jobDescription);
+
+    // Smarter weighting: If JD is very short (< 30 words), it's likely a keyword list.
+    const isKeywordCompare = jobDescription.trim().split(/\s+/).length < 30;
+
     const keywordMatchScore = jdKeywords.length > 0 ? (matchedStems.length / jdKeywords.length) * 100 : 100;
     const skillMatchScore = jdSkills.length > 0 ? (matchedSkills.length / jdSkills.length) * 100 : 100;
     const sectionsCount = Object.values(sectionChecklist).filter(Boolean).length;
-    const sectionCompletenessScore = (sectionsCount / Object.keys(sectionChecklist).length) * 100;
+    let sectionCompletenessScore = (sectionsCount / Object.keys(sectionChecklist).length) * 100;
+
+    // Portfolio Bonus
+    if (hasPortfolio) {
+        sectionCompletenessScore = Math.min(100, sectionCompletenessScore + 10);
+    }
+
+    // Experience Bonus
+    if (expYears > 0) {
+        sectionCompletenessScore = Math.min(100, sectionCompletenessScore + 5);
+    }
+
+    // Contact Info Bonus
+    if (contactInfo.email && contactInfo.phone) {
+        sectionCompletenessScore = Math.min(100, sectionCompletenessScore + 5);
+    }
+
+    let weights = {
+        keyword: 0.35,
+        skill: 0.30,
+        section: 0.20,
+        formatting: 0.15
+    };
+
+    if (isKeywordCompare) {
+        // High focus on direct matching
+        weights = { keyword: 0.50, skill: 0.40, section: 0.05, formatting: 0.05 };
+    }
 
     const weightedScore = Math.round(
-        keywordMatchScore * 0.35 +
-        skillMatchScore * 0.30 +
-        sectionCompletenessScore * 0.20 +
-        formattingScore * 0.15
+        keywordMatchScore * weights.keyword +
+        skillMatchScore * weights.skill +
+        sectionCompletenessScore * weights.section +
+        formattingScore * weights.formatting
     );
 
     const result = {
         score: weightedScore,
-        matchedKeywords: toReadable(matchedStems).slice(0, 12),
-        missingKeywords: toReadable(missingStems).slice(0, 12),
+        matchedKeywords: toReadable(matchedStems).slice(0, 15),
+        missingKeywords: toReadable(missingStems).slice(0, 15),
         sectionChecklist,
         skillGaps: skillGaps.slice(0, 15),
         matchedSkills: matchedSkills.slice(0, 15),
+        hasPortfolio,
+        experienceYears: expYears,
+        internships: internships,
+        contactInfo,
+        actionVerbCount: actionVerbs.count,
+        topActionVerbs: actionVerbs.verbs,
+        softSkillsMatch: softSkills.matched,
+        softSkillsMissing: softSkills.missing,
         subScores: {
             keywordMatch: Math.round(keywordMatchScore),
             skillMatch: Math.round(skillMatchScore),
@@ -1668,6 +1814,14 @@ const calculateScore = (resumeText, jobDescription) => {
 
     result.suggestions = generateSuggestions(result);
     return result;
+};
+
+module.exports = {
+    extractTextFromFile,
+    extractTextFromPDF,
+    calculateScore,
+    SUPPORTED_TYPES,
+    SUPPORTED_IMAGE_TYPES,
 };
 
 module.exports = {

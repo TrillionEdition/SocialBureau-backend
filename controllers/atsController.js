@@ -15,8 +15,8 @@ const analyzeResume = async (req, res) => {
             return res.status(400).json({ message: 'Resume PDF is required' });
         }
 
-        if (!jobDescription || jobDescription.length < 100) {
-            return res.status(400).json({ message: 'Job description must be at least 100 characters' });
+        if (!jobDescription || jobDescription.length < 50) {
+            return res.status(400).json({ message: 'Job description or keywords must be at least 50 characters' });
         }
 
         const resumeText = await extractTextFromPDF(req.file.buffer);
