@@ -21,6 +21,7 @@ const allowedOrigins = [
   "https://www.socialbureau.in",
   "https://socialbureau.in",
   "http://localhost:5173",
+  "http://localhost:5174",
 ];
 
 app.use(

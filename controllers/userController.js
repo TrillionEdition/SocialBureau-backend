@@ -311,7 +311,12 @@ const userController = {
 
     res.status(201).json({
       message: 'User created successfully',
-      user: { id: userCreated._id || userCreated.id, email: userCreated.email, name: userCreated.name },
+      user: { 
+        id: userCreated._id || userCreated.id, 
+        email: userCreated.email, 
+        name: userCreated.name,
+        role: userCreated.role,
+      },
     });
   }),
 
