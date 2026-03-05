@@ -14,7 +14,7 @@ connectDB().then(() => {
   require("./cron/newsletterCron");
   // console.log("✅ Cron jobs initialized after DB connection");
 }).catch(err => {
-  console.error("❌ Failed to start cron jobs:", err);
+  console.error("Failed to start cron jobs:", err);
 });
 
 const allowedOrigins = [
@@ -58,7 +58,6 @@ app.use(
 //   })
 // )
 
-app.use('/api/ats', atsRouter);
 app.use('/', router);
 app.use(errorHandler)
 

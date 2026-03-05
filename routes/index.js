@@ -14,6 +14,10 @@ const clientReviewRoutes = require('./clientReviewRoutes');
 const analyticsRoutes = require("./analyticsRoutes");
 const partnershipRoutes = require("./partnershipRoutes");
 const atsRoutes = require("./ats");
+const resumeRoutes = require("./resumeRoutes");
+const jobPostingRoutes = require("./jobPostingRoutes");
+const jobApplicationRoutes = require("./jobApplicationRoutes");
+const externalJobRoutes = require("./externalJobRoutes");
 
 const router = express.Router();
 
@@ -24,6 +28,9 @@ router.use("/user", userRouter);
 router.use("/review", reviewRoutes);
 router.use("/qa", qaRoutes);
 router.use("/job", jobRoutes)
+router.use("/hr-jobs", jobPostingRoutes);
+router.use("/hr-applications", jobApplicationRoutes);
+router.use("/hr-external-jobs", externalJobRoutes);
 router.use("/blog", blogRoutes);
 router.use("/event", eventRoutes);
 router.use("/newsletter", newsletterRoutes);
@@ -34,6 +41,6 @@ router.use("/api/analytics", analyticsRoutes);
 router.use("/partners", partnershipRoutes);
 // router.use("/payment", paymentRoutes);
 router.use('/ats', atsRoutes);
-
+router.use('/resume', resumeRoutes);
 
 module.exports = router;
