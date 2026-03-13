@@ -1,4 +1,3 @@
-const { BASE_URL } = require('../../SocialBureau/utils/urls');
 const JobApplication = require('../models/JobApplication');
 const JobPosting = require('../models/JobPosting');
 const User = require('../models/userModel');
@@ -52,7 +51,7 @@ const jobApplicationController = {
                 const uploadPath = path.join(__dirname, '../uploads', fileName);
                 fs.writeFileSync(uploadPath, resumeFile.buffer);
                 
-                resumeUrl = `${BASE_URL}/uploads/${fileName}`;
+                resumeUrl = `${process.env.FRONTEND_URL}/uploads/${fileName}`;
             }
 
             const isExternal = !!(await ExternalJob.findById(jobId));
