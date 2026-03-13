@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { invokeGemini, invokeGeminiText } = require('../services/geminiService');
 const {
   extractSEOKeywords,
   incorporateSEOKeywords,
@@ -10,12 +11,27 @@ const {
 } = require('./seoKeywordExtractor');
 
 /**
+ AI Model Call Helper - uses Gemini Text
+ */
+const callAIModel = async (prompt) => {
+  try {
+    return await invokeGeminiText(prompt);
+  } catch (error) {
+    console.error('AI Model call failed:', error);
+    return null;
+  }
+};
+
+/**
  * AI Resume Enhancement using Hugging Face Inference
  */
 
 // Initialize Hugging Face API - you can add your API key in .env
 const HF_API_KEY = process.env.HUGGING_FACE_API_KEY || '';
 const HF_API_BASE = 'https://api-inference.huggingface.co/models';
+
+// Initialize Gemini API - Primary AI for resume features
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 
 /**
  * Generate improved resume summary with AI
@@ -107,7 +123,7 @@ const generateImprovementSuggestions = async (resumeData) => {
 
     // Experience quality
     if (resumeData.experience?.length > 0) {
-      const avgDescLength = resumeData.experience.reduce((sum, exp) => 
+      const avgDescLength = resumeData.experience.reduce((sum, exp) =>
         sum + (exp.description?.length || 0), 0) / resumeData.experience.length;
 
       if (avgDescLength > 50) {
@@ -147,7 +163,7 @@ const generateImprovementSuggestions = async (resumeData) => {
       });
     }
 
-    if (!hasPortfolio && resumeData.skills?.some(s => 
+    if (!hasPortfolio && resumeData.skills?.some(s =>
       ['design', 'developer', 'programmer', 'engineer'].some(keyword => s.toLowerCase().includes(keyword))
     )) {
       analysis.improvements.push({
@@ -237,7 +253,7 @@ const getPersonalizedTips = async (jobTitle, skills) => {
 Format as a JSON array with objects containing 'tip' and 'explanation' fields.`;
 
     const tips = await callAIModel(prompt);
-    
+
     try {
       return JSON.parse(tips);
     } catch {
@@ -258,74 +274,7 @@ Format as a JSON array with objects containing 'tip' and 'explanation' fields.`;
   }
 };
 
-/**
- * Call AI model with prompt
- */
-const callAIModel = async (prompt) => {
-  try {
-    // If Hugging Face API key is available, use it
-    if (HF_API_KEY) {
-      const response = await axios.post(
-        `${HF_API_BASE}/gpt2`,
-        { inputs: prompt },
-        {
-          headers: {
-            Authorization: `Bearer ${HF_API_KEY}`,
-          },
-          timeout: 10000,
-        }
-      );
 
-      if (response.data && response.data[0]) {
-        return response.data[0].generated_text;
-      }
-    }
-
-    // Fallback: Return enhanced version using basic NLP
-    return enhanceTextBasic(prompt);
-  } catch (error) {
-    console.error('AI model error:', error);
-    return enhanceTextBasic(prompt);
-  }
-};
-
-/**
- * Basic text enhancement without external API
- */
-const enhanceTextBasic = (text) => {
-  // Remove quotes from prompt
-  const originalText = text.match(/"([^"]*)"/)?.[1] || text;
-
-  // Add action verbs for job descriptions
-  const actionVerbs = [
-    'Spearheaded',
-    'Orchestrated',
-    'Engineered',
-    'Architected',
-    'Optimized',
-    'Accelerated',
-    'Transformed',
-    'Maximized',
-    'Streamlined',
-    'Expanded'
-  ];
-
-  let enhanced = originalText;
-
-  // If it looks like a job description, start with action verb
-  if (!originalText.toLowerCase().match(/^(led|managed|developed|created|built)/i)) {
-    const verb = actionVerbs[Math.floor(Math.random() * actionVerbs.length)];
-    enhanced = `${verb} ${enhanced}`;
-  }
-
-  // Add impact words
-  const impactWords = ['significant', 'measurable', 'substantial', 'remarkable', 'outstanding'];
-  if (!enhanced.toLowerCase().match(/improved|increased|reduced|enhanced/i)) {
-    enhanced += ' with significant impact on team efficiency';
-  }
-
-  return enhanced;
-};
 
 /**
  * Check resume quality and provide score
@@ -388,10 +337,10 @@ const checkResumeQuality = async (resumeData) => {
 
     // Calculate overall
     quality.overallScore = Math.round(
-      (quality.categories.completeness * 0.3 +
-       quality.categories.content * 0.35 +
-       quality.categories.formatting * 0.15 +
-       quality.categories.ats * 0.2) / 100
+      quality.categories.completeness * 0.3 +
+      quality.categories.content * 0.35 +
+      quality.categories.formatting * 0.15 +
+      quality.categories.ats * 0.2
     );
 
     // Generate feedback
@@ -416,65 +365,40 @@ const checkResumeQuality = async (resumeData) => {
  * Generate complete resume from job description with SEO keywords
  */
 const generateResumeFromJob = async (jobDescription, userInfo = {}) => {
+  const seoKeywords = extractSEOKeywords(jobDescription);
+
+  const prompt = `
+    You are a world-class resume writer, and your task is to create a complete, professional, and ATS-optimized resume based on the provided job description and user information. The output must be a single, minified JSON object.
+
+    ### JOB DESCRIPTION:
+    ${jobDescription}
+
+    ### USER INFORMATION:
+    ${JSON.stringify(userInfo, null, 2)}
+
+    ### INSTRUCTIONS:
+    1.  **Professional Summary**: Write a compelling 2-4 sentence summary that is highly optimized for Google SEO and ATS. Naturally incorporate the provided keywords. High impact, results-oriented language.
+    2.  **Skills**: Extract and list 12-18 relevant technical and soft skills from the job description. Prioritize high-volume SEO keywords found in the description.
+    3.  **Work Experience**: Generate 3 relevant work experience entries with 4-5 impactful, quantifiable bullet points each. Use action verbs and naturally integrate technical keywords. Focus on achievements that include metrics (%, $, numbers) for best accuracy and impact.
+    4.  **Education & Projects**: Create realistic and high-quality entries for education and at least 2 relevant projects that showcase the skills mentioned in the job description.
+    5.  **SEO Strategy**: The entire resume should be built with a "Keyword Density" of 10-15% for the primary skills, ensuring it ranks high for both human recruiters and automated ATS/Search engines.
+    6.  **Accuracy**: Ensure all generated content is professionally worded and contextually accurate to the role.
+
+    ### SEO KEYWORDS TO PRIORITIZE:
+    -   **Primary Technical**: ${seoKeywords.technicalSkills.slice(0, 8).join(', ')}
+    -   **Essential Soft Skills**: ${seoKeywords.softSkills.slice(0, 5).join(', ')}
+    -   **Methodologies**: ${seoKeywords.methodologies.slice(0, 5).join(', ')}
+
+    ### JSON OUTPUT (MUST be a single, minified line):
+    {"personalInfo":{"fullName":"${userInfo.fullName || 'Your Name'}","email":"${userInfo.email || 'your.email@example.com'}","phone":"","location":"","summary":""},"experience":[{"position":"","company":"","duration":"","description":""}],"education":[{"degree":"","institution":""}],"skills":[],"projects":[]}
+  `;
+
   try {
-    // Extract SEO keywords from job description
-    const seoKeywords = extractSEOKeywords(jobDescription);
-    
-    const prompt = `Create a complete resume structure based on this job description:
-
-JOB DESCRIPTION:
-${jobDescription}
-
-USER INFO:
-${JSON.stringify(userInfo, null, 2)}
-
-IMPORTANT - Include these relevant keywords naturally in the resume:
-Technical Skills: ${seoKeywords.technicalSkills.slice(0, 5).join(', ')}
-Soft Skills: ${seoKeywords.softSkills.slice(0, 3).join(', ')}
-Methodologies: ${seoKeywords.methodologies.slice(0, 3).join(', ')}
-
-Generate a comprehensive, SEO-optimized resume with:
-1. Professional Summary (2-3 sentences, incorporating key technical skills)
-2. Key Skills (8-12 relevant skills, prioritizing the keywords above)
-3. Work Experience (2-3 positions with descriptions using relevant keywords)
-4. Education (relevant degrees)
-5. Projects (2-3 relevant projects with keyword optimization)
-
-Format as JSON with this structure:
-{
-  "personalInfo": {
-    "fullName": "${userInfo.fullName || 'Your Name'}",
-    "email": "${userInfo.email || 'your.email@example.com'}",
-    "phone": "${userInfo.phone || '(555) 123-4567'}",
-    "location": "${userInfo.location || 'City, State'}",
-    "summary": "Generated summary incorporating key keywords here"
-  },
-  "experience": [...],
-  "education": [...],
-  "skills": [...],
-  "projects": [...]
-}`;
-
-    const aiResponse = await callAIModel(prompt);
-    let generatedResume = parseAIResumeResponse(aiResponse);
-
-    // Apply SEO optimization to the generated resume
-    if (generatedResume) {
-      const seoOptimized = generateSEOOptimizedResume(generatedResume, jobDescription);
-      generatedResume = seoOptimized.optimizedResume || generatedResume;
-      
-      // Add SEO metadata
-      generatedResume.seoMetadata = {
-        extractedKeywords: seoKeywords,
-        optimized: true,
-        jobDescription: jobDescription.substring(0, 200) // Store first 200 chars for reference
-      };
-    }
-
+    const generatedResume = await invokeGemini(prompt);
     return generatedResume;
   } catch (error) {
-    console.error('Resume generation from job error:', error);
-    throw error;
+    console.error('AI resume generation failed:', error);
+    throw new Error('Failed to generate AI-powered resume. Please try again.');
   }
 };
 
@@ -540,11 +464,11 @@ const optimizeResumeForJob = async (resumeData, jobDescription) => {
   try {
     // Extract SEO keywords from job description
     const seoKeywords = extractSEOKeywords(jobDescription);
-    
+
     // Analyze keyword match
     const resumeText = JSON.stringify(resumeData);
     const keywordMatch = analyzeKeywordMatch(resumeText, jobDescription);
-    
+
     const prompt = `Analyze this resume and job description, then provide SEO-optimized suggestions:
 
 RESUME:
@@ -573,7 +497,7 @@ Format as JSON with changes, explanations, and keyword suggestions.`;
 
     const optimizations = await callAIModel(prompt);
     const parsedOptimizations = parseOptimizationResponse(optimizations);
-    
+
     // Add SEO analysis metadata
     parsedOptimizations.seoAnalysis = {
       keywordMatch: keywordMatch,
@@ -751,7 +675,7 @@ const extractSEOKeywordsFromJob = async (jobDescription) => {
   try {
     const keywords = extractSEOKeywords(jobDescription);
     const tips = generateSEOKeywordTips(jobDescription, keywords);
-    
+
     return {
       success: true,
       keywords,
@@ -778,7 +702,7 @@ const analyzeSEOKeywordMatch = async (resumeData, jobDescription) => {
     const resumeText = JSON.stringify(resumeData);
     const match = analyzeKeywordMatch(resumeText, jobDescription);
     const keywords = extractSEOKeywords(jobDescription);
-    
+
     return {
       success: true,
       match,
@@ -797,18 +721,58 @@ const analyzeSEOKeywordMatch = async (resumeData, jobDescription) => {
   }
 };
 
+/**
+ * Generate multiple AI-powered suggestions for a specific resume section.
+ */
+const generateMultipleSuggestions = async (sectionType, currentContent, context = {}) => {
+  const prompt = `
+    You are an expert resume writing assistant. Your task is to generate three distinct, high-quality suggestions for a resume section.
+
+    ### SECTION:
+    ${sectionType}
+
+    ### CURRENT CONTENT:
+    "${currentContent}"
+
+    ### CONTEXT (Job Title, etc.):
+    ${JSON.stringify(context, null, 2)}
+
+    ### INSTRUCTIONS:
+    1.  **Analyze**: Understand the user's current content and the context.
+    2.  **Generate 3 Alternatives**: Create three unique and improved versions of the content.
+        -   **Suggestion 1 (Conservative)**: A slightly polished and improved version of the original.
+        -   **Suggestion 2 (Bold & Impactful)**: A more dynamic and achievement-oriented version.
+        -   **Suggestion 3 (Creative & Unique)**: A version that takes a unique angle or tone.
+    3.  **Output**: Return a minified JSON object with a single key, "suggestions", which is an array of three strings.
+
+    ### JSON OUTPUT (MUST be a single, minified line):
+    {"suggestions":["Suggestion 1 text...","Suggestion 2 text...","Suggestion 3 text..."]}
+  `;
+
+  try {
+    const result = await invokeGemini(prompt);
+    if (!result.suggestions || result.suggestions.length < 3) {
+      throw new Error('AI did not return enough suggestions.');
+    }
+    return result.suggestions;
+  } catch (error) {
+    console.error(`Failed to generate AI suggestions for ${sectionType}:`, error);
+    throw new Error(`The AI failed to generate suggestions for your ${sectionType}. Please try again.`);
+  }
+};
+
 module.exports = {
   generateImprovedSummary,
   generateImprovementSuggestions,
   improveContent,
   getPersonalizedTips,
   checkResumeQuality,
-  callAIModel,
   generateResumeFromJob,
   generateSectionSuggestions,
   optimizeResumeForJob,
   generateExperienceDescription,
   recommendSkills,
   extractSEOKeywordsFromJob,
-  analyzeSEOKeywordMatch
+  analyzeSEOKeywordMatch,
+  generateMultipleSuggestions
 };

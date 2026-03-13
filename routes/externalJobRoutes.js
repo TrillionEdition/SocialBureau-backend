@@ -1,9 +1,9 @@
 const express = require('express');
-const router = express.Router();
+const externalJobRoutes = express.Router();
 const ExternalJob = require('../models/ExternalJob');
 
 // GET all active external jobs
-router.get('/', async (req, res) => {
+externalJobRoutes.get('/', async (req, res) => {
     try {
         const jobs = await ExternalJob.find({ isActive: true }).sort({ postedAt: -1 });
         res.json(jobs);
@@ -13,7 +13,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET single external job
-router.get('/:id', async (req, res) => {
+externalJobRoutes.get('/:id', async (req, res) => {
     try {
         const job = await ExternalJob.findById(req.params.id);
         if (!job) return res.status(404).json({ message: 'Job not found' });
@@ -24,7 +24,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST - add new external job (admin/employer)
-router.post('/', async (req, res) => {
+externalJobRoutes.post('/', async (req, res) => {
     try {
         const job = new ExternalJob(req.body);
         await job.save();
@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT - update external job
-router.put('/:id', async (req, res) => {
+externalJobRoutes.put('/:id', async (req, res) => {
     try {
         const job = await ExternalJob.findByIdAndUpdate(req.params.id, req.body, { new: true });
         res.json(job);
@@ -45,7 +45,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // DELETE - remove external job
-router.delete('/:id', async (req, res) => {
+externalJobRoutes.delete('/:id', async (req, res) => {
     try {
         await ExternalJob.findByIdAndDelete(req.params.id);
         res.json({ message: 'Deleted' });
@@ -54,4 +54,4 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-module.exports = router;
+module.exports = externalJobRoutes;

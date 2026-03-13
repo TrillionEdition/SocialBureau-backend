@@ -58,6 +58,9 @@ app.use(
 //   })
 // )
 
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 app.use('/', router);
 app.use(errorHandler)
 

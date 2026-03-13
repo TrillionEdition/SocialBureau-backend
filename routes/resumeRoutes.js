@@ -197,4 +197,11 @@ resumeRoutes.post(
     resumeController.analyzeSEOMatch
 );
 
+// AI: Generate multiple suggestions for a section
+resumeRoutes.post(
+    '/generate-suggestions',
+    generateLimiter,
+    resumeController.generateSuggestions
+);
+
 module.exports = resumeRoutes;

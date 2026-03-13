@@ -1,21 +1,27 @@
 const expressAsyncHandler = require('express-async-handler');
 const pdfParse = require('pdf-parse');
 const axios = require('axios');
-const { 
-  extractSoftSkills, 
+const {
+  extractSoftSkills,
   extractTechnicalSkills,
   extractAchievements,
   extractDetailedCertifications,
   generateSummary,
   validateAndEnrichData,
-  improveTextExtraction 
+  improveTextExtraction
 } = require('../utils/extractionEnhancer');
 const {
   generateImprovedSummary,
   generateImprovementSuggestions,
   improveContent,
   getPersonalizedTips,
-  checkResumeQuality
+  checkResumeQuality,
+  generateResumeFromJob: aiGenerateResumeFromJob,
+  generateSectionSuggestions: aiGenerateSectionSuggestions,
+  optimizeResumeForJob: aiOptimizeResumeForJob,
+  generateExperienceDescription: aiGenerateExperienceDescription,
+  recommendSkills: aiRecommendSkills,
+  generateMultipleSuggestions // Add this line
 } = require('../utils/aiResumeEnhancer');
 
 /**
@@ -34,6 +40,8 @@ function sendSuccess(res, data, message = 'Success') {
   return res.json({ success: true, message, data });
 }
 
+const { extractResumeDataAI } = require('../utils/resumeParserAI');
+
 /**
  * Extract text and data from PDF with AI enhancement
  */
@@ -46,7 +54,7 @@ const extractPdfData = expressAsyncHandler(async (req, res) => {
     }
 
     const fileBuffer = req.file.buffer;
-    
+
     if (!fileBuffer || fileBuffer.length === 0) {
       console.error('Empty file buffer received');
       return sendError(res, 400, 'File is empty. Please upload a valid PDF.');
@@ -73,39 +81,35 @@ const extractPdfData = expressAsyncHandler(async (req, res) => {
     let text = improveTextExtraction(pdfData.text);
     console.log(`Extracted text length: ${text.length} characters`);
 
-    // Extract structured data from PDF text
-    let extractedData = parseResumeText(text);
-    console.log('Basic data extracted', {
-      name: extractedData.personalInfo?.fullName,
-      email: extractedData.personalInfo?.email,
-      experienceCount: extractedData.experience?.length || 0,
-      skillCount: extractedData.skills?.length || 0
-    });
-    
-    // Enhance with AI features
-    extractedData.softSkills = extractSoftSkills(text);
-    extractedData.achievements = extractAchievements(text);
-    extractedData.certifications = extractDetailedCertifications(text);
-    
-    console.log('AI features added', {
-      softSkills: extractedData.softSkills?.length || 0,
-      achievements: extractedData.achievements?.length || 0,
-      certifications: extractedData.certifications?.length || 0
-    });
-    
-    // Enrich and validate data
-    extractedData = validateAndEnrichData(extractedData);
-    
-    // Generate AI summary if not already present
-    if (!extractedData.personalInfo?.summary || extractedData.personalInfo.summary.length < 50) {
-      try {
-        console.log('Generating AI summary...');
-        extractedData.personalInfo.summary = await generateSummary(text);
-        console.log('Summary generated successfully');
-      } catch (err) {
-        console.log('Summary generation skipped, using basic extraction', err.message);
+    // Use Gemini AI for the entire extraction
+    console.log('Extracting resume data with Gemini AI...');
+    let extractedData;
+    try {
+      extractedData = await extractResumeDataAI(text);
+      console.log('Gemini AI extraction successful');
+    } catch (aiErr) {
+      console.error('Gemini AI extraction failed, falling back to heuristic parsing:', aiErr.message);
+      // Fallback to basic heuristic parsing if AI fails
+      extractedData = parseResumeText(text);
+
+      // Still try to generate AI summary if basic parsing is used
+      if (!extractedData.personalInfo?.summary || extractedData.personalInfo.summary.length < 50) {
+        try {
+          console.log('Generating AI summary fallback...');
+          extractedData.personalInfo.summary = await generateSummary(text);
+        } catch (sumErr) {
+          console.log('Summary fallback failed', sumErr.message);
+        }
       }
     }
+
+    // Ensure all required fields exist in the result
+    extractedData.softSkills = extractedData.softSkills || extractSoftSkills(text);
+    extractedData.achievements = extractedData.achievements || extractAchievements(text);
+    extractedData.certifications = extractedData.certifications || extractDetailedCertifications(text);
+
+    // Enrich and validate data
+    extractedData = validateAndEnrichData(extractedData);
 
     console.log('PDF extraction completed successfully');
     return sendSuccess(res, extractedData, 'PDF extracted successfully with AI enhancement');
@@ -154,10 +158,10 @@ function parseResumeText(text) {
 function extractName(lines, text) {
   // First non-email, non-phone line is usually the name
   for (const line of lines) {
-    if (line.length > 2 && line.length < 50 && 
-        !line.includes('@') && 
-        !line.match(/\d{3}/) &&
-        line.split(' ').length <= 4) {
+    if (line.length > 2 && line.length < 50 &&
+      !line.includes('@') &&
+      !line.match(/\d{3}/) &&
+      line.split(' ').length <= 4) {
       return line;
     }
   }
@@ -285,7 +289,7 @@ function extractExperienceEnhanced(text, lines) {
 
   for (let i = 0; i < jobLines.length; i++) {
     const line = jobLines[i].trim();
-    
+
     // Look for job titles or new positions
     if (line.match(/[A-Z][a-z\s]*(?:designer|developer|manager|engineer|analyst|specialist|consultant|coordinator|director|lead|architect|officer|executive|associate)[\w\s]*/i)) {
       if (currentJob && (currentJob.company || currentJob.position)) {
@@ -341,7 +345,7 @@ function extractEducationEnhanced(text, lines) {
   let currentEdu = null;
   for (let i = 0; i < eduLines.length; i++) {
     const line = eduLines[i].trim();
-    
+
     if (line.match(degreePatterns)) {
       if (currentEdu) education.push(currentEdu);
       currentEdu = {
@@ -547,8 +551,8 @@ const generateResume = expressAsyncHandler(async (req, res) => {
     }
 
     // Format resume data for ATS if template is atsOptimized
-    const formattedData = template === 'atsOptimized' 
-      ? formatForATS(data) 
+    const formattedData = template === 'atsOptimized'
+      ? formatForATS(data)
       : data;
 
     return sendSuccess(res, formattedData, 'Resume generated successfully');
@@ -595,7 +599,7 @@ const downloadResumePDF = expressAsyncHandler(async (req, res) => {
     }
 
     // For now, return success - actual PDF generation would use a library like pdfkit or puppeteer
-    return sendSuccess(res, { 
+    return sendSuccess(res, {
       url: '/resume-placeholder.pdf',
       fileName: `${fileName || 'resume'}.pdf`
     }, 'PDF download link generated');
@@ -618,7 +622,7 @@ const saveDraft = expressAsyncHandler(async (req, res) => {
 
     // In a real implementation, save to database
     // For now, return success
-    return sendSuccess(res, { 
+    return sendSuccess(res, {
       id: Date.now(),
       userId,
       name,
@@ -751,7 +755,7 @@ const generateImprovements = expressAsyncHandler(async (req, res) => {
       return sendError(res, 400, 'Resume data is required');
     }
 
-    const suggestions = generateImprovementSuggestions(data);
+    const suggestions = await generateImprovementSuggestions(data);
 
     return sendSuccess(res, suggestions, 'Improvement suggestions generated');
   } catch (error) {
@@ -898,10 +902,10 @@ function calculateScore(resumeData) {
   }
 
   const percentage = Math.round((score / maxScore) * 100);
-  
+
   let level = 'Beginner';
   let recommendation = '';
-  
+
   if (percentage >= 90) {
     level = 'Excellent';
     recommendation = 'Your resume is in great shape! You\'re ready to apply.';
@@ -1062,7 +1066,7 @@ const generateResumeFromJob = expressAsyncHandler(async (req, res) => {
     }
 
     console.log('Generating resume from job description...');
-    const generatedResume = await generateResumeFromJob(jobDescription, userInfo || {});
+    const generatedResume = await aiGenerateResumeFromJob(jobDescription, userInfo || {});
 
     return sendSuccess(res, generatedResume, 'Resume generated from job description');
   } catch (error) {
@@ -1083,7 +1087,7 @@ const generateSectionSuggestions = expressAsyncHandler(async (req, res) => {
     }
 
     console.log(`Generating suggestions for ${sectionType} section...`);
-    const suggestions = await generateSectionSuggestions(sectionType, context || {});
+    const suggestions = await aiGenerateSectionSuggestions(sectionType, context || {});
 
     return sendSuccess(res, { suggestions }, 'Section suggestions generated');
   } catch (error) {
@@ -1104,7 +1108,7 @@ const optimizeResumeForJob = expressAsyncHandler(async (req, res) => {
     }
 
     console.log('Optimizing resume for job...');
-    const optimizations = await optimizeResumeForJob(resumeData, jobDescription);
+    const optimizations = await aiOptimizeResumeForJob(resumeData, jobDescription);
 
     return sendSuccess(res, optimizations, 'Resume optimized for job');
   } catch (error) {
@@ -1125,7 +1129,7 @@ const generateExperienceDescription = expressAsyncHandler(async (req, res) => {
     }
 
     console.log(`Generating experience description for ${position} at ${company}...`);
-    const description = await generateExperienceDescription(position, company, achievements || []);
+    const description = await aiGenerateExperienceDescription(position, company, achievements || []);
 
     return sendSuccess(res, { description }, 'Experience description generated');
   } catch (error) {
@@ -1146,7 +1150,7 @@ const recommendSkills = expressAsyncHandler(async (req, res) => {
     }
 
     console.log(`Recommending skills for ${jobTitle}...`);
-    const recommendations = await recommendSkills(jobTitle, currentSkills || []);
+    const recommendations = await aiRecommendSkills(jobTitle, currentSkills || []);
 
     return sendSuccess(res, recommendations, 'Skills recommended');
   } catch (error) {
@@ -1167,7 +1171,7 @@ const extractSEOKeywords = expressAsyncHandler(async (req, res) => {
     }
 
     const result = await require('../utils/aiResumeEnhancer').extractSEOKeywordsFromJob(jobDescription);
-    
+
     if (result.success) {
       return sendSuccess(res, result, 'SEO keywords extracted successfully');
     } else {
@@ -1191,7 +1195,7 @@ const analyzeSEOMatch = expressAsyncHandler(async (req, res) => {
     }
 
     const result = await require('../utils/aiResumeEnhancer').analyzeSEOKeywordMatch(resumeData, jobDescription);
-    
+
     if (result.success) {
       return sendSuccess(res, result, 'SEO keyword match analyzed successfully');
     } else {
@@ -1200,6 +1204,26 @@ const analyzeSEOMatch = expressAsyncHandler(async (req, res) => {
   } catch (error) {
     console.error('SEO match analysis error:', error);
     return sendError(res, 500, 'Failed to analyze SEO match', error.message);
+  }
+});
+
+/**
+ * Generate multiple AI suggestions for a specific resume section
+ */
+const generateSuggestions = expressAsyncHandler(async (req, res) => {
+  try {
+    const { sectionType, currentContent, context } = req.body;
+
+    if (!sectionType || !currentContent) {
+      return sendError(res, 400, 'Section type and current content are required');
+    }
+
+    const suggestions = await generateMultipleSuggestions(sectionType, currentContent, context || {});
+
+    return sendSuccess(res, { suggestions }, 'AI suggestions generated successfully');
+  } catch (error) {
+    console.error('AI suggestion generation error:', error);
+    return sendError(res, 500, 'Failed to generate AI suggestions', error.message);
   }
 });
 
@@ -1225,5 +1249,6 @@ module.exports = {
   generateExperienceDescription,
   recommendSkills,
   extractSEOKeywords,
-  analyzeSEOMatch
+  analyzeSEOMatch,
+  generateSuggestions
 };

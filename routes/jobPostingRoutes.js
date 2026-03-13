@@ -1,9 +1,10 @@
 const express = require('express');
-const router = express.Router();
+const jobPostingRoutes = express.Router();
 const jobPostingController = require('../controllers/jobPostingController');
 
-router.post('/', jobPostingController.createJobPosting);
-router.get('/', jobPostingController.getJobPostings);
-router.get('/:id', jobPostingController.getJobDetails);
+jobPostingRoutes.post('/', jobPostingController.createJobPosting);
+jobPostingRoutes.get('/', jobPostingController.getJobPostings);
+jobPostingRoutes.get('/employer-jobs/:employerId', jobPostingController.getEmployerJobs);
+jobPostingRoutes.get('/:id', jobPostingController.getJobDetails);
 
-module.exports = router;
+module.exports = jobPostingRoutes;
