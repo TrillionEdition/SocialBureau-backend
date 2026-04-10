@@ -17,7 +17,7 @@
 
 // routes/newsLetterRoutes.js
 const express = require("express");
-const router = express.Router();
+const newsletterRoutes = express.Router();
 
 const {
   subscribeNewsletter,
@@ -26,12 +26,11 @@ const {
   unsubscribeNewsletter,
 } = require("../controllers/newsLetterController");
 
-// Public routes
-router.post("/subscribe", subscribeNewsletter);
-router.post("/unsubscribe", unsubscribeNewsletter);
+newsletterRoutes.post("/subscribe", subscribeNewsletter);
+newsletterRoutes.post("/unsubscribe", unsubscribeNewsletter);
 
 // Admin/Testing routes (add auth middleware if needed)
-router.post("/send-test", sendTestNewsletter);
-router.get("/stats", getSubscriberCount);
+newsletterRoutes.post("/send-test", sendTestNewsletter);
+newsletterRoutes.get("/stats", getSubscriberCount);
 
-module.exports = router;
+module.exports = newsletterRoutes;

@@ -10,7 +10,7 @@ const atsRoutes = express.Router();
 ========================= */
 const analyzeLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 100,//100 requests per hour
+    max: 100,
     message: { message: "Too many requests, try again in an hour" },
     standardHeaders: true,
     legacyHeaders: false,
@@ -40,6 +40,14 @@ atsRoutes.post(
     atsController.analyzeResume
 );
 
+// Generate fresh ATS-friendly resume
+atsRoutes.post(
+    '/generate-resume',
+    analyzeLimiter,
+    upload.single('resume'),
+    atsController.generateResume
+);
+
 // Get ATS scan history
 atsRoutes.get(
     '/history',
@@ -50,6 +58,18 @@ atsRoutes.get(
 atsRoutes.delete(
     '/history/:id',
     atsController.deleteHistory
+);
+
+// Get structured JSON resume for editing
+atsRoutes.get(
+    '/resume/:id',
+    atsController.getResume
+);
+
+// Update structured JSON resume after user edits
+atsRoutes.put(
+    '/resume/:id',
+    atsController.updateResume
 );
 
 module.exports = atsRoutes;
