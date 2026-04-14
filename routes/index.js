@@ -8,6 +8,7 @@ const eventRoutes = require("./eventRoutes");
 const newsletterRoutes = require("./newsletterRoutes");
 const achievementRoutes = require("./achievementRoutes");
 const companyAchievementRoutes = require("./companyAchievementRoutes");
+const clientRoutes = require("./clientRoutes");
 // const paymentRoutes = require("./paymentRoutes");
 const jobRoutes = require("./jobRoutes");
 const clientReviewRoutes = require('./clientReviewRoutes');
@@ -18,6 +19,8 @@ const resumeRoutes = require("./resumeRoutes");
 const jobPostingRoutes = require("./jobPostingRoutes");
 const jobApplicationRoutes = require("./jobApplicationRoutes");
 const externalJobRoutes = require("./externalJobRoutes");
+const teamRoutes = require("./teamRoutes");
+const ClientRouters = require("./clientRoutes");
 
 const router = express.Router();
 
@@ -28,6 +31,7 @@ router.use("/user", userRouter);
 router.use("/review", reviewRoutes);
 router.use("/qa", qaRoutes);
 router.use("/job", jobRoutes)
+router.use("/clients", ClientRouters);
 router.use("/hr-jobs", jobPostingRoutes);
 router.use("/hr-applications", jobApplicationRoutes);
 router.use("/hr-external-jobs", externalJobRoutes);
@@ -42,5 +46,6 @@ router.use("/partners", partnershipRoutes);
 // router.use("/payment", paymentRoutes);
 router.use('/ats', atsRoutes);
 router.use('/resume', resumeRoutes);
+router.use('/team', teamRoutes);
 
 module.exports = router;

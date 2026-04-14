@@ -3,6 +3,12 @@ const Review = require('../models/reviewModel');
 const expressAsyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
 const User = require('../models/userModel');
+const { getCache, setCache, invalidateCache } = require('../utils/Cacheutils');
+
+// TTL constants (seconds)
+const REVIEW_LIST_TTL  = 60 * 10;  // 10 minutes for approved review lists
+const GOOGLE_REVIEW_TTL = 60 * 60; // 1 hour for Google Place reviews
+
 
 function sendError(res, status = 400, message = 'Bad Request', details = null) {
   const payload = { success: false, message };
@@ -67,6 +73,11 @@ const reviewController = {
         .populate(employeeId ? 'employee' : '')
         .lean();
 
+      // Invalidate any cached review lists for this employee so fresh data shows
+      if (employeeId) {
+        await invalidateCache(`reviews:employee:${employeeId}:approved`);
+      }
+
       return res.status(201).json({ success: true, data: populated });
     } catch (err) {
       console.error('createReview error', err);
@@ -106,6 +117,21 @@ const reviewController = {
         fields,
       } = req.query;
 
+      // Build a deterministic cache key for the most common cached query:
+      // approved reviews for a specific employee (used by StaffDashboard)
+      const isCacheable =
+        approved === 'true' && employee && !q && !minRating && !maxRating && !fields &&
+        Number(page) === 1 && Number(limit) <= 50;
+
+      const cacheKey = isCacheable ? `reviews:employee:${employee}:approved` : null;
+
+      if (cacheKey) {
+        const cached = await getCache(cacheKey);
+        if (cached) {
+          return res.json({ ...cached, source: 'cache' });
+        }
+      }
+
       const p = Math.max(1, parseInt(page, 10) || 1);
       const l = Math.min(200, Math.max(1, parseInt(limit, 10) || 20));
 
@@ -125,7 +151,6 @@ const reviewController = {
       if (maxRating !== undefined) filter.rating = { ...(filter.rating || {}), $lte: Number(maxRating) };
 
       if (q) {
-        // basic text search on review, name, email
         const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
         filter.$or = [{ review: regex }, { name: regex }, { email: regex }];
       }
@@ -139,14 +164,13 @@ const reviewController = {
         .populate('employee', 'name email');
 
       if (fields) {
-        // fields comma separated
         const select = fields.split(',').join(' ');
         query = query.select(select);
       }
 
       const [items, total] = await Promise.all([query.lean(), Review.countDocuments(filter)]);
 
-      return res.json({
+      const payload = {
         success: true,
         meta: {
           page: p,
@@ -155,7 +179,14 @@ const reviewController = {
           pages: Math.ceil(total / l),
         },
         data: items,
-      });
+      };
+
+      // Prime the cache for cacheable queries
+      if (cacheKey) {
+        await setCache(cacheKey, payload, REVIEW_LIST_TTL);
+      }
+
+      return res.json(payload);
     } catch (err) {
       console.error('listReviews error', err);
       return sendError(res, 500, 'Internal server error', err.message);
@@ -211,6 +242,11 @@ const reviewController = {
 
       const updated = await Review.findByIdAndUpdate(id, { approved: true }, { new: true }).lean();
       if (!updated) return sendError(res, 404, 'Review not found');
+
+      // Invalidate the employee's cached review list so fresh approved reviews appear
+      if (updated.employee) {
+        await invalidateCache(`reviews:employee:${updated.employee}:approved`);
+      }
 
       return res.json({ success: true, data: updated });
     } catch (err) {
@@ -279,6 +315,13 @@ const reviewController = {
       if (!apiKey) return sendError(res, 500, 'Google API key not configured on server');
       if (!placeId) return sendError(res, 400, 'placeId is required (query param or GOOGLE_PLACE_ID env)');
 
+      // Cache Google reviews aggressively — they update infrequently
+      const googleCacheKey = `google:reviews:${placeId}`;
+      const cached = await getCache(googleCacheKey);
+      if (cached) {
+        return res.json({ success: true, source: 'cache', data: cached });
+      }
+
       const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${encodeURIComponent(
         placeId
       )}&fields=name,rating,reviews,formatted_phone_number,website`;
@@ -291,14 +334,10 @@ const reviewController = {
         return sendError(res, 502, `Google Places API error: ${message}`);
       }
 
-      // return the reviews (if any) and some place metadata
-      // Google Place Details returns review objects which often include
-      // `profile_photo_url` for the reviewer. Normalize reviews and
-      // provide a safe fallback for the frontend.
       const normalizedReviews = (data.result?.reviews || []).map((r) => ({
         author_name: r.author_name,
         author_url: r.author_url,
-        profile_photo_url: r.profile_photo_url || null, // may be absent for some reviews
+        profile_photo_url: r.profile_photo_url || null,
         rating: r.rating,
         relative_time_description: r.relative_time_description,
         text: r.text,
@@ -314,7 +353,11 @@ const reviewController = {
         },
         reviews: normalizedReviews,
       };
-      return res.json({ success: true, data: result });
+
+      // Cache the Google reviews result
+      await setCache(googleCacheKey, result, GOOGLE_REVIEW_TTL);
+
+      return res.json({ success: true, source: 'origin', data: result });
     } catch (err) {
       console.error('getGoogleReviews error', err?.response?.data || err.message || err);
       return sendError(res, 500, 'Failed to fetch Google reviews', err.message || err);
