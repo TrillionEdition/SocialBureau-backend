@@ -252,86 +252,89 @@ const clickupController = {
       const { clientName, clientCompany, status, dueDate, priority } = req.body;
 
       if (!clientName) {
-        return res.status(400).json({ message: "Client name is required" });
+        return res.status(400).json({ success: false, message: "Client name is required" });
       }
 
-      console.log("📋 Creating ClickUp Task with data:", { clientName, clientCompany, status, dueDate, priority });
-      console.log("📋 Using LIST_ID:", LIST_ID);
-      console.log("📋 Using TOKEN:", CLICKUP_TOKEN ? "✓ Present" : "✗ Missing");
+      console.log("\n📋 ============ CLICKUP TASK CREATION ============");
+      console.log("📋 Input Data:", { clientName, clientCompany, status, dueDate, priority });
+      console.log("📋 LIST_ID:", LIST_ID);
+      console.log("📋 TOKEN Present:", !!CLICKUP_TOKEN);
 
-      const taskTitle = `${clientName} - ${clientCompany || 'No Company'}`;
-      const taskDescription = `Follow up with client: ${clientName}\nCompany: ${clientCompany || 'N/A'}\nCurrent Status: ${status || 'N/A'}`;
+      const taskTitle = `Client: ${clientName}${clientCompany ? ` - ${clientCompany}` : ''}`;
+      const taskDescription = `New client inquiry\n\nName: ${clientName}\nCompany: ${clientCompany || 'N/A'}\nStatus: ${status || 'New'}`;
 
-      // Prepare ClickUp API request with MINIMAL required fields first
-      const taskData = {
+      // Build minimal task payload - only include required/standard fields
+      const taskPayload = {
         name: taskTitle,
         description: taskDescription
       };
 
+      // Add priority if provided (ClickUp uses 1-4 scale, but can be null)
+      if (priority) {
+        taskPayload.priority = priority;
+      }
+
       // Add due date if provided (ClickUp expects milliseconds)
       if (dueDate) {
         const dueMs = new Date(dueDate).getTime();
-        taskData.due_date = dueMs;
-        console.log("📋 Due date set to:", new Date(dueMs).toISOString(), `(${dueMs}ms)`);
+        taskPayload.due_date = dueMs;
+        console.log("📋 Due date (ms):", dueMs);
       }
 
-      // Add priority if provided (1-4 scale)
-      if (priority) {
-        taskData.priority = priority;
-      }
+      // Assign to team member (optional - remove if causing issues)
+      taskPayload.assignees = [88409188];
 
-      console.log("📋 Task payload:", JSON.stringify(taskData, null, 2));
+      console.log("📋 Final Payload:", JSON.stringify(taskPayload, null, 2));
 
       const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task`;
       console.log("📋 POST URL:", url);
-      console.log("📋 Headers:", { 
-        "Authorization": CLICKUP_TOKEN ? `[TOKEN_LENGTH: ${CLICKUP_TOKEN.length}]` : "MISSING",
-        "Content-Type": "application/json"
-      });
+      console.log("📋 Authorization Header Length:", CLICKUP_TOKEN?.length);
 
-      const response = await axios.post(url, taskData, {
+      const response = await axios.post(url, taskPayload, {
         headers: {
           Authorization: CLICKUP_TOKEN,
           "Content-Type": "application/json"
         },
-        timeout: 10000,
-        validateStatus: function (status) {
-          return status < 500; // Resolve only if the status code is less than 500
-        }
+        timeout: 10000
       });
 
-      console.log("📋 ClickUp Response Status:", response.status);
-      console.log("📋 ClickUp Response Data:", JSON.stringify(response.data, null, 2));
+      console.log("✅ Task Created!");
+      console.log("✅ Task ID:", response.data.id);
+      console.log("✅ Task URL:", response.data.url);
+      console.log("📋 ============ SUCCESS ============\n");
 
-      if (response.status >= 200 && response.status < 300) {
-        console.log("✅ Task Created Successfully:", response.data);
-        res.json({
-          success: true,
-          message: "ClickUp task created successfully",
-          taskId: response.data.id,
-          taskUrl: response.data.url,
-          task: response.data
-        });
-      } else {
-        console.error("❌ ClickUp Error Response:", response.status, response.data);
-        throw new Error(response.data?.err || `HTTP ${response.status}: ${JSON.stringify(response.data)}`);
-      }
+      return res.json({
+        success: true,
+        message: "ClickUp task created successfully",
+        taskId: response.data.id,
+        taskUrl: response.data.url,
+        taskName: response.data.name
+      });
+
     } catch (error) {
-      const errorMsg = error.response?.data || error.message;
-      console.error("❌ ClickUp Task Creation Error:", errorMsg);
-      console.error("❌ Full Error:", {
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        message: error.message,
-        stack: error.stack
-      });
+      console.error("\n❌ ============ ERROR ============");
+      console.error("❌ Status:", error.response?.status);
+      console.error("❌ Status Text:", error.response?.statusText);
+      console.error("❌ Error Data:", JSON.stringify(error.response?.data, null, 2));
+      console.error("❌ Message:", error.message);
       
-      res.status(500).json({
+      // Log the request that was sent
+      if (error.config) {
+        console.error("❌ Request Data:", error.config.data);
+        console.error("❌ Request URL:", error.config.url);
+      }
+      console.error("📋 ============ END ERROR ============\n");
+
+      const errorMessage = error.response?.data?.err || error.response?.data?.message || error.message;
+      
+      return res.status(error.response?.status || 500).json({
         success: false,
         message: "Failed to create ClickUp task",
-        error: errorMsg,
-        details: error.response?.data?.err || error.message
+        error: errorMessage,
+        details: {
+          status: error.response?.status,
+          data: error.response?.data
+        }
       });
     }
   }),
