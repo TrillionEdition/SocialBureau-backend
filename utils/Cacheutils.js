@@ -40,7 +40,6 @@ const setCache = async (key, data, expiry = CACHE_EXPIRY.JOBS_LIST) => {
         await setexAsync(key, expiry, jsonData);
         // Silently cache (no logging spam)
     } catch (err) {
-        // Silently fail - continue without cache
     }
 };
 
