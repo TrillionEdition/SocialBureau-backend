@@ -3,7 +3,7 @@ const User = require("../models/userModel");
 const Achievement = require("../models/achievementModel");
 const expressAsyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
-const { getCache, setCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
+const { getCache, setCache, CACHE_EXPIRY } = require("../utils/cacheUtils");
 
 const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 const TEAM_ID = "9014733918";
