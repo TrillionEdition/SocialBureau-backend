@@ -28,7 +28,6 @@ const {
 } = require("../controllers/jobController");
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
-const { getCache, setCache, invalidateCache, CACHE_EXPIRY } = require("../utils/cacheUtils");
 
 // CREATE JOB (admin only)
 jobRoutes.post("/", userAuthentication, isAdmin, createJob);
