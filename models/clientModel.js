@@ -13,6 +13,7 @@ const clientSchema = new mongoose.Schema({
 
   current_marketing_description: String,
   monthly_budget_range: String,
+  currency: { type: String, default: 'INR' },
   timeline_to_start: String,
 
   status: {

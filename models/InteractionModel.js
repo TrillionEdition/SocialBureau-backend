@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const interactionSchema = new mongoose.Schema({
   client_id: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Client'
+    ref: 'ClientForm'
   },
   interaction_type: String,
   title: String,
