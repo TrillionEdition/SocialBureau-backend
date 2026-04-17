@@ -4,6 +4,8 @@ const partnershipController = require("../controllers/partnershipController");
 const userAuthentication = require("../middlewares/userAuthentication");
 const adminAuthentication = require("../middlewares/adminAuthentication");
 
+partnershipRoutes.post("/schedule-meeting", partnershipController.scheduleMeeting);
+
 partnershipRoutes.post("/", userAuthentication, adminAuthentication, partnershipController.createPartner);
 partnershipRoutes.get("/", partnershipController.getPartners);
 partnershipRoutes.get("/:param", partnershipController.getPartnerByParam);
