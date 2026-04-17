@@ -21,6 +21,7 @@ const jobApplicationRoutes = require("./jobApplicationRoutes");
 const externalJobRoutes = require("./externalJobRoutes");
 const teamRoutes = require("./teamRoutes");
 const ClientRouters = require("./clientRoutes");
+const apiLeadRoutes = require("./apiLeadRoutes");
 
 const router = express.Router();
 
@@ -47,5 +48,6 @@ router.use("/partners", partnershipRoutes);
 router.use('/ats', atsRoutes);
 router.use('/resume', resumeRoutes);
 router.use('/team', teamRoutes);
+router.use("/api-leads", apiLeadRoutes);
 
 module.exports = router;
