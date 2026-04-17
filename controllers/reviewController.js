@@ -3,7 +3,7 @@ const Review = require('../models/reviewModel');
 const expressAsyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
 const User = require('../models/userModel');
-const { getCache, setCache, invalidateCache } = require('../utils/cacheUtils');
+const { getCache, setCache, invalidateCache } = require('../utils/Cacheutils');
 
 // TTL constants (seconds)
 const REVIEW_LIST_TTL  = 60 * 10;  // 10 minutes for approved review lists

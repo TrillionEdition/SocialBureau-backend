@@ -1,5 +1,5 @@
 const { getAsync, setexAsync, delAsync, isConnected } = require("../database/Redisconfig");
-const { getCache, setCache } = require("./cacheUtils");
+const { getCache, setCache } = require("./Cacheutils");
 
 // In-memory rate limit store (fallback when Redis is down)
 const inMemoryRateLimit = new Map();

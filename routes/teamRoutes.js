@@ -1,6 +1,6 @@
 const express = require("express");
+const { invalidateCache } = require("../utils/Cacheutils");
 const teamRoutes = express.Router();
-const { getCache, setCache, CACHE_EXPIRY } = require("../utils/cacheUtils");
 
 /**
  * Static team data — served via Redis-cached API endpoint.
@@ -212,7 +212,6 @@ teamRoutes.get("/", async (req, res) => {
  */
 teamRoutes.post("/invalidate", async (req, res) => {
   try {
-    const { invalidateCache } = require("../utils/cacheUtils");
     await invalidateCache(TEAM_CACHE_KEY);
     return res.json({ success: true, message: "Team cache invalidated" });
   } catch (err) {

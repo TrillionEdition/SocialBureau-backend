@@ -1,6 +1,6 @@
 const Job = require("../models/JobModel");
 const slugify = require("slugify");
-const { getCache, setCache, invalidateJobCaches, CACHE_EXPIRY } = require("../utils/cacheUtils");
+const { getCache, setCache, invalidateJobCaches, CACHE_EXPIRY } = require("../utils/Cacheutils");
 
 // CREATE JOB
 exports.createJob = async (req, res) => {

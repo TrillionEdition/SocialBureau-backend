@@ -4,7 +4,7 @@
  */
 
 const { getAsync, setexAsync, delAsync, flushdbAsync } = require("../database/Redisconfig");
-const { getCache, setCache } = require("../cacheUtils");
+const { getCache, setCache } = require("../Cacheutils");
 
 // ============================================
 // 1. RATE LIMITING (Prevent API Abuse)
