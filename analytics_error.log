@@ -506,3 +506,11 @@ for call at
 Query: {"range":"last30Days"}
 User: {"email":"reshmasamzain@gmail.com","id":"699e9d7460b599e8a4c5abdc","role":"admin","verification":false}
 ---
+[2026-04-25T15:12:18.550Z] /api/analytics error: ENOENT: no such file or directory, open 'C:\Users\webas\BC\SocialBureau-backend\social-bureau-analytics-630a396efe7c.json'
+Stack: Error: ENOENT: no such file or directory, open 'C:\Users\webas\BC\SocialBureau-backend\social-bureau-analytics-630a396efe7c.json'
+Query: {"range":"last30Days"}
+User: {"email":"mouse@gmail.com","id":"6989a86e1571e6341a978657","role":"admin","verification":false}
+---
+[2026-04-25T15:12:18.559Z] /api/analytics/summary error: ENOENT: no such file or directory, open 'C:\Users\webas\BC\SocialBureau-backend\social-bureau-analytics-630a396efe7c.json'
+Stack: Error: ENOENT: no such file or directory, open 'C:\Users\webas\BC\SocialBureau-backend\social-bureau-analytics-630a396efe7c.json'
+---
