@@ -23,6 +23,7 @@ const teamRoutes = require("./teamRoutes");
 const ClientRouters = require("./clientRoutes");
 const apiLeadRoutes = require("./apiLeadRoutes");
 const mediaWaitlistRoutes = require("./mediaWaitlistRoutes");
+const ajnoraRoutes = require("./ajnoraRoutes");
 
 const router = express.Router();
 
@@ -51,5 +52,6 @@ router.use('/resume', resumeRoutes);
 router.use('/team', teamRoutes);
 router.use("/api-leads", apiLeadRoutes);
 router.use("/media-waitlist", mediaWaitlistRoutes);
+router.use("/ajnora", ajnoraRoutes);
 
 module.exports = router;
