@@ -48,6 +48,14 @@ const partnershipSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
+    details: {
+      type: Object,
+      default: {},
+    },
+    isFree: {
+      type: Boolean,
+      default: false,
+    },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -62,7 +62,7 @@ const partnershipController = {
     }).populate(
       "updatedBy",
       "name email"
-    );
+    ).select("+user");
 
     if (!partner) {
       res.status(404);
@@ -272,6 +272,115 @@ const partnershipController = {
       console.error("Error sending schedule email:", error);
       res.status(500);
       throw new Error("Failed to send meeting emails");
+    }
+  }),
+  
+  // Upload Image to Cloudinary
+  uploadImage: asyncHandler(async (req, res) => {
+    if (!req.file) {
+      res.status(400);
+      throw new Error("No image file provided");
+    }
+    
+    res.json({
+      success: true,
+      url: req.file.path, // Cloudinary URL
+      message: "Image uploaded successfully"
+    });
+  }),
+  
+  // Get logged-in user's partnership
+  getMyPartnership: asyncHandler(async (req, res) => {
+    const userId = req.user?._id || req.user?.id;
+    const partner = await Partnership.findOne({ user: userId });
+    
+    if (!partner) {
+      // Don't throw error, just return empty data so frontend knows to create
+      return res.json({ success: true, data: null });
+    }
+    
+    res.json({
+      success: true,
+      data: partner
+    });
+  }),
+  
+  // Create or Update logged-in user's partnership
+  createOrUpdateMyPartnership: asyncHandler(async (req, res) => {
+    try {
+      const userId = req.user?._id || req.user?.id;
+      const { name, param, email, category, status, tags, image, subtitle, details } = req.body;
+      
+      if (!name || !param) {
+        res.status(400);
+        throw new Error("Name and param are required");
+      }
+      
+      let partner = await Partnership.findOne({ user: userId });
+      
+      // Check if param conflicts with another user's partnership
+      const exists = await Partnership.findOne({ 
+        param: { $regex: new RegExp(`^${param}$`, "i") },
+        user: { $nin: [userId, null, undefined] } // Conflict only if another user already owns it
+      });
+      
+      if (exists) {
+        res.status(400);
+        throw new Error("URL param already taken by another partner");
+      }
+      
+      // If we find an orphaned partnership with this param, we might want to adopt it
+      const orphan = await Partnership.findOne({
+        param: { $regex: new RegExp(`^${param}$`, "i") },
+        user: { $exists: false }
+      });
+
+      const updateData = {
+        name,
+        param,
+        email: email || req.user?.email,
+        category: category || "student",
+        status: status || "active",
+        tags: tags || ["student", "portfolio"],
+        image,
+        subtitle,
+        details,
+        isFree: req.body.isFree || false,
+        role: "partnership",
+        user: userId,
+        updatedBy: userId
+      };
+      
+      if (partner) {
+        // User already has a partnership, update it
+        partner = await Partnership.findOneAndUpdate(
+          { user: userId },
+          updateData,
+          { new: true, runValidators: true }
+        );
+      } else if (orphan) {
+        // No partnership for user yet, but an orphaned one exists with this slug. Claim it.
+        partner = await Partnership.findByIdAndUpdate(
+          orphan._id,
+          updateData,
+          { new: true, runValidators: true }
+        );
+      } else {
+        // Create new
+        partner = await Partnership.create(updateData);
+      }
+      
+      res.status(200).json({
+        success: true,
+        message: partner ? "Portfolio synchronized successfully" : "Created successfully",
+        data: partner
+      });
+    } catch (error) {
+      console.error("CRITICAL PORTFOLIO ERROR:", error);
+      res.status(500).json({
+        success: false,
+        message: error.message || "Internal Server Error during portfolio initialization"
+      });
     }
   }),
 };
