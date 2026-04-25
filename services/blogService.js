@@ -1,21 +1,3 @@
-// const Blog = require("../models/blogModel");
-
-// const getLatestPublishedBlog = async () => {
-//   return await Blog.findOne({ published: true })
-//     .sort({ publishedAt: -1 })
-//     .select(
-//       "title slug customUrl excerpt image authorName readingTime publishedAt content"
-//     )
-//     .lean();
-// };
-
-// module.exports = {
-//   getLatestPublishedBlog,
-// };
-
-
-
-
 const Blog = require("../models/blogModel");
 const Job = require("../models/JobModel");
 
