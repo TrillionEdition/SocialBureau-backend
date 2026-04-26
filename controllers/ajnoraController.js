@@ -1,4 +1,5 @@
 const Ajnora = require("../models/Ajnora");
+const emailService = require("../services/emailService");
 
 const ajnoraController = {
   // Create new entry
@@ -60,6 +61,15 @@ const ajnoraController = {
 
       const newEntry = new Ajnora(req.body);
       const savedEntry = await newEntry.save();
+
+      // Send confirmation email to the client
+      try {
+        await emailService.sendAjnoraConfirmation(savedEntry);
+      } catch (emailError) {
+        console.error("Failed to send confirmation email:", emailError);
+        // We don't want to fail the whole request if email fails, but we log it
+      }
+
       res.status(201).json({ success: true, data: savedEntry });
     } catch (error) {
       console.error("Create entry error:", error);
