@@ -10,6 +10,7 @@ const ajnoraSchema = new mongoose.Schema(
     // --- SECTION 0: COMPANY PROFILE ---
     legalName: { type: String, trim: true },
     brandName: { type: String, trim: true },
+    brandTagline: { type: String, trim: true },
     companyType: { type: String },
     incYear: { type: String },
     cin: { type: String, trim: true },
