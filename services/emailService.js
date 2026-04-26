@@ -37,29 +37,27 @@ exports.sendAjnoraConfirmation = async (data) => {
   await transporter.sendMail({
     from: `"SocialBureau Strategy Lab" <${process.env.MAIL_USER}>`,
     to: contactEmail,
-    subject: `Dossier Transmitted: ${companyName} Phase 01 Intake`,
+    subject: `Submission Received – We’ll Be in Touch`,
     html: `
       <div style="font-family: 'DM Sans', sans-serif; max-width: 600px; margin: 0 auto; background-color: #0a0a0a; color: #ffffff; padding: 40px; border-radius: 20px; border: 1px solid #333;">
         <div style="text-align: center; margin-bottom: 30px;">
           <h1 style="color: #e8242a; font-size: 24px; text-transform: uppercase; letter-spacing: 2px;">
           <img src="https://res.cloudinary.com/dtwcgfmar/image/upload/v1777199141/SB_sticker-02_1_k3ulwd.png" 
           alt="SocialBureau" 
-          className="h-40 sm:h-40 w-auto" /></h1>
+          style="height: 100px; width: auto;" /></h1>
           <div style="height: 2px; width: 50px; background-color: #e8242a; margin: 10px auto;"></div>
         </div>
-        
-        <h2 style="font-size: 20px; margin-bottom: 20px;">Protocol: Phase 01 Discovery</h2>
         
         <p style="color: #cccccc; line-height: 1.6; font-size: 16px;">
           Hi <strong>${contactName}</strong>,
         </p>
 
         <p style="color: #ffffff; line-height: 1.6; font-size: 18px; font-weight: bold; margin: 20px 0;">
-          Thank you for choosing SocialBureau. We will be in touch with you immediately.
+          Thank you for choosing Social Bureau.
         </p>
         
         <p style="color: #cccccc; line-height: 1.6; font-size: 16px;">
-          The intake dossier for <strong>${companyName}</strong> has been successfully transmitted and verified by the SocialBureau Strategy Lab.
+          We’ve received your submission, and it has been successfully verified by our <strong>Strategy Lab</strong>.
         </p>
         
         <div style="background-color: #111; padding: 20px; border-radius: 10px; margin: 30px 0; border-left: 4px solid #e8242a;">
@@ -71,7 +69,15 @@ exports.sendAjnoraConfirmation = async (data) => {
         </div>
         
         <p style="color: #cccccc; line-height: 1.6; font-size: 16px;">
-          Our strategy team is currently analyzing your data points. You will receive a response from our lead consultant within the next 48 hours to discuss the next phase of your digital expansion.
+          Our team is currently reviewing your requirements. A consultant will reach out within the next 48 hours with initial insights and next steps.
+        </p>
+
+        <p style="color: #cccccc; line-height: 1.6; font-size: 16px; margin-top: 20px;">
+          If you’d like to add anything, feel free to reply to this email.
+        </p>
+
+        <p style="color: #ffffff; line-height: 1.6; font-size: 16px; margin-top: 30px;">
+          Warm regards,
         </p>
         
         <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #333; text-align: center; font-size: 12px; color: #666;">
