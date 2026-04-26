@@ -1,12 +1,13 @@
 const express = require("express");
-const router = express.Router();
+const ajnoraRouters = express.Router();
 const ajnoraController = require("../controllers/ajnoraController");
+const upload = require("../middlewares/cloudinary");
 
-router.post("/", ajnoraController.createEntry);
-router.get("/", ajnoraController.getAllEntries);
-router.get("/stats", ajnoraController.getStats);
-router.get("/:id", ajnoraController.getEntry);
-router.patch("/:id", ajnoraController.updateEntry);
-router.delete("/:id", ajnoraController.deleteEntry);
+ajnoraRouters.post("/", upload.any(), ajnoraController.createEntry);
+ajnoraRouters.get("/", ajnoraController.getAllEntries);
+ajnoraRouters.get("/stats", ajnoraController.getStats);
+ajnoraRouters.get("/:id", ajnoraController.getEntry);
+ajnoraRouters.patch("/:id", upload.any(), ajnoraController.updateEntry);
+ajnoraRouters.delete("/:id", ajnoraController.deleteEntry);
 
-module.exports = router;
+module.exports = ajnoraRouters;
