@@ -11,6 +11,7 @@ const blogJobTemplate = require("../utils/blogEmailTemplate");
 const { getLatestPublishedBlog, getLatestActiveJob } = require("../services/blogService");
 
 const crypto = require("crypto");
+const { storeVerificationCode, getVerificationCode, removeVerificationCode } = require("../utils/redis/Advancedcaching");
 
 // helper to get upload URL from multer/cloudinary file object
 function getUrlFromFile(f) {
@@ -598,80 +599,115 @@ const userController = {
   forgotPassword: asyncHandler(async (req, res) => {
     const { email } = req.body;
 
+    if (!email) {
+      res.status(400);
+      throw new Error("Email is required");
+    }
+
     const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
       res.status(404);
       throw new Error("Email not found");
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
+    // Generate 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    user.resetPasswordToken = token;
-    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
-    await user.save();
+    // Store OTP in Redis/Memory with 10 minute expiry
+    await storeVerificationCode(user.email, otp, 600);
 
-    // ✅ Get FRONTEND_URL from environment variables
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-    const resetUrl = `${FRONTEND_URL}/reset-password/${token}`;
-
+    // Send OTP via email
     await sendMail({
       to: user.email,
-      subject: "Reset your password",
+      subject: "Password Reset OTP - SocialBureau",
       html: `
-      <p>You requested a password reset.</p>
-      <p>Click the link below:</p>
-      <a href="${resetUrl}">${resetUrl}</a>
-      <p>This link expires in 15 minutes.</p>
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
+        <h2 style="color: #d32f2f; text-align: center;">SocialBureau Password Reset</h2>
+        <p>You requested to reset your password. Use the following One-Time Password (OTP) to proceed:</p>
+        <div style="text-align: center; margin: 30px 0;">
+          <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f5f5f5; padding: 10px 20px; border-radius: 5px; border: 1px dashed #d32f2f; color: #d32f2f;">
+            ${otp}
+          </span>
+        </div>
+        <p>This OTP is valid for 10 minutes. If you did not request this, please ignore this email.</p>
+        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        <p style="font-size: 12px; color: #777; text-align: center;">© 2024 SocialBureau. All rights reserved.</p>
+      </div>
     `,
     });
 
-    res.json({ message: "Reset email sent" });
+    res.json({ success: true, message: "OTP sent to your email" });
+  }),
+
+  verifyResetOTP: asyncHandler(async (req, res) => {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      res.status(400);
+      throw new Error("Email and OTP are required");
+    }
+
+    const storedOtp = await getVerificationCode(email.toLowerCase().trim());
+
+    if (!storedOtp || storedOtp !== otp) {
+      res.status(400);
+      throw new Error("Invalid or expired OTP");
+    }
+
+    // Remove OTP after verification
+    await removeVerificationCode(email.toLowerCase().trim());
+
+    // Generate a temporary signed token for password reset (valid for 5 minutes)
+    const resetToken = jwt.sign(
+      { email: email.toLowerCase().trim(), type: "password_reset" },
+      process.env.JWT_SECRET_KEY,
+      { expiresIn: "5m" }
+    );
+
+    res.json({
+      success: true,
+      message: "OTP verified successfully",
+      resetToken,
+    });
   }),
 
   resetPassword: asyncHandler(async (req, res) => {
-    const { token } = req.params;
-    const { password } = req.body;
+    const { token, password } = req.body;
 
-    console.log("🔍 Reset attempt with token:", token);
-    console.log("⏰ Current time:", Date.now());
-
-    if (!password) {
+    if (!token || !password) {
       res.status(400);
-      throw new Error("Password is required");
+      throw new Error("Token and password are required");
     }
 
-    const user = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
-    });
+    try {
+      // Verify the temporary reset token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
 
-    console.log("✅ User found:", user ? user.email : "NO USER FOUND");
-    if (user) {
-      console.log("📅 Token expires at:", user.resetPasswordExpires);
-      console.log("⏱️ Time remaining:", user.resetPasswordExpires - Date.now(), "ms");
-    }
-
-    if (!user) {
-      // Debug: check if token exists at all (regardless of expiry)
-      const expiredUser = await User.findOne({ resetPasswordToken: token });
-      if (expiredUser) {
-        console.warn("⚠️ Token found but EXPIRED");
-        res.status(400);
-        throw new Error("Reset link has expired. Please request a new one.");
+      if (decoded.type !== "password_reset") {
+        throw new Error("Invalid token type");
       }
+
+      const user = await User.findOne({ email: decoded.email });
+
+      if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+      }
+
+      const hashed = await bcrypt.hash(password, 10);
+      user.password = hashed;
+      
+      // Clear any old link-based tokens if they exist
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpires = undefined;
+
+      await user.save();
+
+      res.json({ success: true, message: "Password reset successful" });
+    } catch (err) {
       res.status(400);
-      throw new Error("Invalid reset link");
+      throw new Error("Invalid or expired reset token. Please start over.");
     }
-
-    const hashed = await bcrypt.hash(password, 10);
-    user.password = hashed;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-
-    await user.save();
-    console.log("✅ Password reset successful for:", user.email);
-
-    res.json({ message: "Password reset successful" });
   }),
 
   getUserById: asyncHandler(async (req, res) => {
