@@ -1,8 +1,11 @@
 const Partnership = require("../models/partnershipModel");
 const Meeting = require("../models/meetingModel");
 const asyncHandler = require("express-async-handler");
+const fs = require("fs");
+const path = require("path");
 const sendMail = require("../utils/sendMail");
 const googleService = require("../services/googleService");
+const User = require("../models/userModel");
 
 const partnershipController = {
   // Create a new partnership
@@ -45,7 +48,11 @@ const partnershipController = {
 
   // Get all partnerships
   getPartners: asyncHandler(async (req, res) => {
-    const partners = await Partnership.find({})
+    const filter = {};
+    if (req.query.category) filter.category = req.query.category;
+    if (req.query.isFree) filter.isFree = req.query.isFree === 'true';
+
+    const partners = await Partnership.find(filter)
       .populate("updatedBy", "name email")
       .sort("-createdAt");
 
@@ -84,7 +91,10 @@ const partnershipController = {
       throw new Error("Partner not found");
     }
 
-    const { name, param, email, category, status, tags, image, subtitle, role, user } = req.body;
+    const { name, param, email, category, status, tags, image, subtitle, role, user, details, isFree, templateId } = req.body;
+    const logMsg = `[${new Date().toISOString()}] ADMIN_UPDATE: ID=${req.params.id}, Name=${name}, Details=${!!details}\n`;
+    fs.appendFileSync("save_debug.log", logMsg);
+    console.log(logMsg);
 
     // Check if param is being changed and if it conflicts
     if (param && param !== partner.param) {
@@ -106,8 +116,15 @@ const partnershipController = {
     partner.image = image || partner.image;
     partner.subtitle = subtitle || partner.subtitle;
     partner.role = role || partner.role;
+    partner.details = details || partner.details;
+    partner.templateId = templateId || partner.templateId;
+    partner.isFree = isFree !== undefined ? isFree : partner.isFree;
     partner.user = user !== undefined ? (user || undefined) : partner.user;
     partner.updatedBy = req.user?.id;
+
+    if (details) {
+      partner.markModified('details');
+    }
 
     const updatedPartner = await partner.save();
 
@@ -127,11 +144,16 @@ const partnershipController = {
       throw new Error("Partner not found");
     }
 
-    await partner.remove();
+    // Also delete the associated user if it exists
+    if (partner.user) {
+      await User.findByIdAndDelete(partner.user);
+    }
+
+    await Partnership.findByIdAndDelete(req.params.id);
 
     res.json({
       success: true,
-      message: "Partner removed successfully",
+      message: "Partner and associated user removed successfully",
     });
   }),
 
@@ -309,7 +331,7 @@ const partnershipController = {
   createOrUpdateMyPartnership: asyncHandler(async (req, res) => {
     try {
       const userId = req.user?._id || req.user?.id;
-      const { name, param, email, category, status, tags, image, subtitle, details } = req.body;
+      const { name, param, email, category, status, tags, image, subtitle, details, templateId } = req.body;
       
       if (!name || !param) {
         res.status(400);
@@ -335,6 +357,10 @@ const partnershipController = {
         user: { $exists: false }
       });
 
+      const logMsg = `[${new Date().toISOString()}] OWNER_SAVE: User=${userId}, Name=${name}, Details=${!!details}\n`;
+      fs.appendFileSync("save_debug.log", logMsg);
+      console.log(logMsg);
+      
       const updateData = {
         name,
         param,
@@ -344,7 +370,8 @@ const partnershipController = {
         tags: tags || ["student", "portfolio"],
         image,
         subtitle,
-        details,
+        details: details || (partner ? partner.details : {}),
+        templateId: templateId || (partner ? partner.templateId : "template1"),
         isFree: req.body.isFree || false,
         role: "partnership",
         user: userId,
@@ -382,6 +409,56 @@ const partnershipController = {
         message: error.message || "Internal Server Error during portfolio initialization"
       });
     }
+  }),
+
+  // Get student stats for floating notifications
+  getStudentStats: asyncHandler(async (req, res) => {
+    try {
+      const totalCount = await Partnership.countDocuments({ isFree: true });
+      
+      const recentStudents = await Partnership.find({ isFree: true })
+        .select("name image param user")
+        .populate("user", "avatar name")
+        .sort("-createdAt")
+        .limit(15);
+        
+      res.status(200).json({
+        success: true,
+        totalCount: totalCount || 0,
+        recentStudents: (recentStudents || []).map(s => ({
+          id: s._id,
+          name: s.name,
+          param: s.param,
+          image: s.user?.avatar || s.image || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.name)}&background=random`
+        }))
+      });
+    } catch (err) {
+      console.error("CRITICAL GET STUDENT STATS ERROR:", err);
+      res.status(200).json({ 
+        success: true, 
+        totalCount: 0, 
+        recentStudents: [],
+        error: err.message 
+      });
+    }
+  }),
+
+  // Get single partnership by ID (Admin)
+  getPartnerById: asyncHandler(async (req, res) => {
+    const partner = await Partnership.findById(req.params.id).populate(
+      "user",
+      "name email avatar"
+    );
+
+    if (!partner) {
+      res.status(404);
+      throw new Error("Partner not found");
+    }
+
+    res.json({
+      success: true,
+      data: partner,
+    });
   }),
 };
 
