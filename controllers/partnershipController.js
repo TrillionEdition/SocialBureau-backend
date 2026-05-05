@@ -365,7 +365,7 @@ const partnershipController = {
         name,
         param,
         email: email || req.user?.email,
-        category: category || "student",
+        category: category || (templateId === "influencer" ? "influencer" : "student"),
         status: status || "active",
         tags: tags || ["student", "portfolio"],
         image,
@@ -440,6 +440,27 @@ const partnershipController = {
         recentStudents: [],
         error: err.message 
       });
+    }
+  }),
+
+  // Get dashboard counts for Hub
+  getDashboardStats: asyncHandler(async (req, res) => {
+    try {
+      const studentCount = await Partnership.countDocuments({ 
+        $or: [{ category: "student" }, { isFree: true }] 
+      });
+      const influencerCount = await Partnership.countDocuments({ 
+        category: "influencer" 
+      });
+
+      res.status(200).json({
+        success: true,
+        studentCount: studentCount || 0,
+        influencerCount: influencerCount || 0
+      });
+    } catch (err) {
+      console.error("DASHBOARD STATS ERROR:", err);
+      res.status(500).json({ success: false, message: "Error fetching dashboard stats" });
     }
   }),
 

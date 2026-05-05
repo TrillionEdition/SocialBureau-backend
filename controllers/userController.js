@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const asyncHandler = require("express-async-handler")
 const User = require("../models/userModel")
+const Partnership = require("../models/partnershipModel");
 const Tool = require("../models/toolModel")
 const Client = require("../models/clientsModel")
 const Subscriber = require("../models/Subscriber");
@@ -604,39 +605,81 @@ const userController = {
       throw new Error("Email is required");
     }
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    let user;
+    try {
+      // 1. Try finding by primary User account email
+      user = await User.findOne({ email: email.toLowerCase().trim() });
+
+      // 2. If not found, try searching the Partnerships collection
+      if (!user) {
+        console.log(`[AUTH] Primary email ${email} not found. Searching partnerships...`);
+        const partner = await Partnership.findOne({ 
+          email: email.toLowerCase().trim() 
+        }).populate("user");
+
+        if (partner && partner.user) {
+          user = partner.user;
+          console.log(`[AUTH] Linked user found via partnership: ${user.email}`);
+        } else if (partner) {
+           // Orphaned partnership with an email but no user account
+           res.status(400);
+           throw new Error("Portfolio found, but no associated account. Please register first.");
+        }
+      }
+    } catch (dbError) {
+      console.error("Database connection error during OTP request:", dbError.message);
+      res.status(503);
+      throw new Error("System is currently offline or undergoing maintenance. Please check your internet connection.");
+    }
+
     if (!user) {
       res.status(404);
-      throw new Error("Email not found");
+      throw new Error("Email not found in our security database.");
     }
 
     // Generate 6-digit numeric OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
     // Store OTP in Redis/Memory with 10 minute expiry
-    await storeVerificationCode(user.email, otp, 600);
+    try {
+      // Use the email they provided as the key, so they can verify with the same email
+      await storeVerificationCode(email.toLowerCase().trim(), otp, 600);
+    } catch (redisError) {
+      console.warn("OTP Storage warning:", redisError.message);
+      // storeVerificationCode has an internal fallback, so we can continue
+    }
 
-    // Send OTP via email
+    // Send OTP via email (Always send to the email they provided/requested)
+    const targetEmail = email.toLowerCase().trim();
+    
     await sendMail({
-      to: user.email,
-      subject: "Password Reset OTP - SocialBureau",
+      to: targetEmail,
+      subject: "Verification Protocol - SocialBureau Identity",
       html: `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px;">
-        <h2 style="color: #d32f2f; text-align: center;">SocialBureau Password Reset</h2>
-        <p>You requested to reset your password. Use the following One-Time Password (OTP) to proceed:</p>
-        <div style="text-align: center; margin: 30px 0;">
-          <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f5f5f5; padding: 10px 20px; border-radius: 5px; border: 1px dashed #d32f2f; color: #d32f2f;">
-            ${otp}
-          </span>
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
+        <div style="text-align: center; margin-bottom: 40px;">
+          <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
+          <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Security Verification Protocol</p>
         </div>
-        <p>This OTP is valid for 10 minutes. If you did not request this, please ignore this email.</p>
-        <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-        <p style="font-size: 12px; color: #777; text-align: center;">© 2024 SocialBureau. All rights reserved.</p>
+        
+        <p style="font-size: 16px; color: #ccc; line-height: 1.6;">A request was made to authorize a password reset for your account. Please use the following temporary access code:</p>
+        
+        <div style="text-align: center; margin: 40px 0;">
+          <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
+            <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+          </div>
+        </div>
+        
+        <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this sequence, please secure your account immediately.</p>
+        
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
+          <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2024 SocialBureau // Identity Systems</p>
+        </div>
       </div>
     `,
     });
 
-    res.json({ success: true, message: "OTP sent to your email" });
+    res.json({ success: true, message: "Verification code dispatched successfully." });
   }),
 
   verifyResetOTP: asyncHandler(async (req, res) => {
@@ -647,7 +690,8 @@ const userController = {
       throw new Error("Email and OTP are required");
     }
 
-    const storedOtp = await getVerificationCode(email.toLowerCase().trim());
+    const normalizedEmail = email.toLowerCase().trim();
+    const storedOtp = await getVerificationCode(normalizedEmail);
 
     if (!storedOtp || storedOtp !== otp) {
       res.status(400);
@@ -655,11 +699,25 @@ const userController = {
     }
 
     // Remove OTP after verification
-    await removeVerificationCode(email.toLowerCase().trim());
+    await removeVerificationCode(normalizedEmail);
+    
+    // Find the actual user primary email to put in the token
+    // This ensures resetPassword (which looks by email) finds the right account
+    let accountEmail = normalizedEmail;
+    const primaryUser = await User.findOne({ email: normalizedEmail });
+    
+    if (!primaryUser) {
+      // If not a primary email, check if it's a partnership email
+      const partner = await Partnership.findOne({ email: normalizedEmail }).populate("user");
+      if (partner && partner.user) {
+        accountEmail = partner.user.email;
+        console.log(`[AUTH] Mapping partnership email ${normalizedEmail} to account email ${accountEmail}`);
+      }
+    }
 
     // Generate a temporary signed token for password reset (valid for 5 minutes)
     const resetToken = jwt.sign(
-      { email: email.toLowerCase().trim(), type: "password_reset" },
+      { email: accountEmail, type: "password_reset" },
       process.env.JWT_SECRET_KEY,
       { expiresIn: "5m" }
     );

@@ -49,28 +49,24 @@ const sendMail = async ({ to, subject, html }) => {
   console.log(`HTML LENGTH: ${html ? html.length : 0} characters`);
 
   try {
-    // console.log("🔄 Connecting to SMTP server...");
-    
     const info = await transporter.sendMail({
       from: `"SocialBureau" <${process.env.MAIL_USER}>`,
       to,
       subject,
       html,
     });
-    
-    // console.log("✅ ===== EMAIL SENT SUCCESSFULLY =====");
-    // console.log(`Message ID: ${info.messageId}`);
-    // console.log(`Response: ${info.response}`);
-    // console.log("=============================\n");
-    
     return info;
   } catch (err) {
     console.error("\n❌ ===== EMAIL SEND FAILED =====");
-    console.error(`ERROR TYPE: ${err.name}`);
     console.error(`ERROR MESSAGE: ${err.message}`);
-    console.error(`ERROR CODE: ${err.code}`);
-    console.error(`FULL ERROR:`, err);
-    // console.error("=============================\n");
+
+    // 🔥 DEVELOPMENT FALLBACK: Log to console if offline/SMTP fails
+    if (process.env.NODE_ENV !== "production") {
+      console.log("\n🛠️  [DEV FALLBACK] Email would have been sent to:", to);
+      console.log("🛠️  [DEV FALLBACK] HTML Content Preview:", html.substring(0, 500) + "...");
+      console.log("✅ [DEV FALLBACK] Proceeding as success for local development.\n");
+      return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
+    }
     
     throw err;
   }

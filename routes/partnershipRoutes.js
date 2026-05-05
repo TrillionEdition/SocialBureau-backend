@@ -6,6 +6,7 @@ const adminAuthentication = require("../middlewares/adminAuthentication");
 const upload = require("../middlewares/cloudinary");
 
 partnershipRoutes.get("/student-stats", partnershipController.getStudentStats);
+partnershipRoutes.get("/dashboard-stats", partnershipController.getDashboardStats);
 partnershipRoutes.post("/schedule-meeting", partnershipController.scheduleMeeting);
 
 partnershipRoutes.post("/", userAuthentication, adminAuthentication, partnershipController.createPartner);
