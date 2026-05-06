@@ -121,7 +121,7 @@ const clickupController = {
       }
 
       const includeSensitive = String(req.query.includeSensitive).toLowerCase() === "true";
-      
+
       // Redis Cache Check (only for non-sensitive requests)
       const cacheKey = `user:details:${userName.toLowerCase().trim()}`;
       if (!includeSensitive) {
@@ -317,7 +317,7 @@ const clickupController = {
       console.error("❌ Status Text:", error.response?.statusText);
       console.error("❌ Error Data:", JSON.stringify(error.response?.data, null, 2));
       console.error("❌ Message:", error.message);
-      
+
       // Log the request that was sent
       if (error.config) {
         console.error("❌ Request Data:", error.config.data);
@@ -326,7 +326,7 @@ const clickupController = {
       console.error("📋 ============ END ERROR ============\n");
 
       const errorMessage = error.response?.data?.err || error.response?.data?.message || error.message;
-      
+
       return res.status(error.response?.status || 500).json({
         success: false,
         message: "Failed to create ClickUp task",
