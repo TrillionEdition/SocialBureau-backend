@@ -52,6 +52,10 @@ const partnershipSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+    templateId: {
+      type: String,
+      default: "template1",
+    },
     isFree: {
       type: Boolean,
       default: false,

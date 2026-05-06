@@ -3,7 +3,7 @@
  * For implementing Redis across your entire website
  */
 
-const { getAsync, setexAsync, delAsync, flushdbAsync } = require("../database/Redisconfig");
+const { getAsync, setexAsync, delAsync, flushdbAsync } = require("../../database/Redisconfig");
 const { getCache, setCache } = require("../Cacheutils");
 
 // ============================================
@@ -160,7 +160,7 @@ const warmCache = async () => {
     console.log("🔥 Warming cache...");
 
     // Pre-load all active jobs
-    const Job = require("../models/JobModel");
+    const Job = require("../../models/JobModel");
     const jobs = await Job.find({ isActive: true }).sort({ createdAt: -1 });
     await setCache("jobs:all", jobs, 3600);
 

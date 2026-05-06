@@ -3,6 +3,7 @@ const bcrypt = require("bcrypt")
 const jwt = require("jsonwebtoken")
 const asyncHandler = require("express-async-handler")
 const User = require("../models/userModel")
+const Partnership = require("../models/partnershipModel");
 const Tool = require("../models/toolModel")
 const Client = require("../models/clientsModel")
 const Subscriber = require("../models/Subscriber");
@@ -11,6 +12,7 @@ const blogJobTemplate = require("../utils/blogEmailTemplate");
 const { getLatestPublishedBlog, getLatestActiveJob } = require("../services/blogService");
 
 const crypto = require("crypto");
+const { storeVerificationCode, getVerificationCode, removeVerificationCode } = require("../utils/redis/Advancedcaching");
 
 // helper to get upload URL from multer/cloudinary file object
 function getUrlFromFile(f) {
@@ -598,80 +600,172 @@ const userController = {
   forgotPassword: asyncHandler(async (req, res) => {
     const { email } = req.body;
 
-    const user = await User.findOne({ email: email.toLowerCase().trim() });
-    if (!user) {
-      res.status(404);
-      throw new Error("Email not found");
+    if (!email) {
+      res.status(400);
+      throw new Error("Email is required");
     }
 
-    const token = crypto.randomBytes(32).toString("hex");
+    let user;
+    try {
+      // 1. Try finding by primary User account email
+      user = await User.findOne({ email: email.toLowerCase().trim() });
 
-    user.resetPasswordToken = token;
-    user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes
-    await user.save();
+      // 2. If not found, try searching the Partnerships collection
+      if (!user) {
+        console.log(`[AUTH] Primary email ${email} not found. Searching partnerships...`);
+        const partner = await Partnership.findOne({ 
+          email: email.toLowerCase().trim() 
+        }).populate("user");
 
-    // ✅ Get FRONTEND_URL from environment variables
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-    const resetUrl = `${FRONTEND_URL}/reset-password/${token}`;
+        if (partner && partner.user) {
+          user = partner.user;
+          console.log(`[AUTH] Linked user found via partnership: ${user.email}`);
+        } else if (partner) {
+           // Orphaned partnership with an email but no user account
+           res.status(400);
+           throw new Error("Portfolio found, but no associated account. Please register first.");
+        }
+      }
+    } catch (dbError) {
+      console.error("Database connection error during OTP request:", dbError.message);
+      res.status(503);
+      throw new Error("System is currently offline or undergoing maintenance. Please check your internet connection.");
+    }
 
+    if (!user) {
+      res.status(404);
+      throw new Error("Email not found in our security database.");
+    }
+
+    // Generate 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Store OTP in Redis/Memory with 10 minute expiry
+    try {
+      // Use the email they provided as the key, so they can verify with the same email
+      await storeVerificationCode(email.toLowerCase().trim(), otp, 600);
+    } catch (redisError) {
+      console.warn("OTP Storage warning:", redisError.message);
+      // storeVerificationCode has an internal fallback, so we can continue
+    }
+
+    // Send OTP via email (Always send to the email they provided/requested)
+    const targetEmail = email.toLowerCase().trim();
+    
     await sendMail({
-      to: user.email,
-      subject: "Reset your password",
+      to: targetEmail,
+      subject: "Verification Protocol - SocialBureau Identity",
       html: `
-      <p>You requested a password reset.</p>
-      <p>Click the link below:</p>
-      <a href="${resetUrl}">${resetUrl}</a>
-      <p>This link expires in 15 minutes.</p>
+      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
+        <div style="text-align: center; margin-bottom: 40px;">
+          <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
+          <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Security Verification Protocol</p>
+        </div>
+        
+        <p style="font-size: 16px; color: #ccc; line-height: 1.6;">A request was made to authorize a password reset for your account. Please use the following temporary access code:</p>
+        
+        <div style="text-align: center; margin: 40px 0;">
+          <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
+            <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+          </div>
+        </div>
+        
+        <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this sequence, please secure your account immediately.</p>
+        
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
+          <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2024 SocialBureau // Identity Systems</p>
+        </div>
+      </div>
     `,
     });
 
-    res.json({ message: "Reset email sent" });
+    res.json({ success: true, message: "Verification code dispatched successfully." });
+  }),
+
+  verifyResetOTP: asyncHandler(async (req, res) => {
+    const { email, otp } = req.body;
+
+    if (!email || !otp) {
+      res.status(400);
+      throw new Error("Email and OTP are required");
+    }
+
+    const normalizedEmail = email.toLowerCase().trim();
+    const storedOtp = await getVerificationCode(normalizedEmail);
+
+    if (!storedOtp || storedOtp !== otp) {
+      res.status(400);
+      throw new Error("Invalid or expired OTP");
+    }
+
+    // Remove OTP after verification
+    await removeVerificationCode(normalizedEmail);
+    
+    // Find the actual user primary email to put in the token
+    // This ensures resetPassword (which looks by email) finds the right account
+    let accountEmail = normalizedEmail;
+    const primaryUser = await User.findOne({ email: normalizedEmail });
+    
+    if (!primaryUser) {
+      // If not a primary email, check if it's a partnership email
+      const partner = await Partnership.findOne({ email: normalizedEmail }).populate("user");
+      if (partner && partner.user) {
+        accountEmail = partner.user.email;
+        console.log(`[AUTH] Mapping partnership email ${normalizedEmail} to account email ${accountEmail}`);
+      }
+    }
+
+    // Generate a temporary signed token for password reset (valid for 5 minutes)
+    const resetToken = jwt.sign(
+      { email: accountEmail, type: "password_reset" },
+      process.env.JWT_SECRET_KEY,
+      { expiresIn: "5m" }
+    );
+
+    res.json({
+      success: true,
+      message: "OTP verified successfully",
+      resetToken,
+    });
   }),
 
   resetPassword: asyncHandler(async (req, res) => {
-    const { token } = req.params;
-    const { password } = req.body;
+    const { token, password } = req.body;
 
-    console.log("🔍 Reset attempt with token:", token);
-    console.log("⏰ Current time:", Date.now());
-
-    if (!password) {
+    if (!token || !password) {
       res.status(400);
-      throw new Error("Password is required");
+      throw new Error("Token and password are required");
     }
 
-    const user = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
-    });
+    try {
+      // Verify the temporary reset token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
 
-    console.log("✅ User found:", user ? user.email : "NO USER FOUND");
-    if (user) {
-      console.log("📅 Token expires at:", user.resetPasswordExpires);
-      console.log("⏱️ Time remaining:", user.resetPasswordExpires - Date.now(), "ms");
-    }
-
-    if (!user) {
-      // Debug: check if token exists at all (regardless of expiry)
-      const expiredUser = await User.findOne({ resetPasswordToken: token });
-      if (expiredUser) {
-        console.warn("⚠️ Token found but EXPIRED");
-        res.status(400);
-        throw new Error("Reset link has expired. Please request a new one.");
+      if (decoded.type !== "password_reset") {
+        throw new Error("Invalid token type");
       }
+
+      const user = await User.findOne({ email: decoded.email });
+
+      if (!user) {
+        res.status(404);
+        throw new Error("User not found");
+      }
+
+      const hashed = await bcrypt.hash(password, 10);
+      user.password = hashed;
+      
+      // Clear any old link-based tokens if they exist
+      user.resetPasswordToken = undefined;
+      user.resetPasswordExpires = undefined;
+
+      await user.save();
+
+      res.json({ success: true, message: "Password reset successful" });
+    } catch (err) {
       res.status(400);
-      throw new Error("Invalid reset link");
+      throw new Error("Invalid or expired reset token. Please start over.");
     }
-
-    const hashed = await bcrypt.hash(password, 10);
-    user.password = hashed;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-
-    await user.save();
-    console.log("✅ Password reset successful for:", user.email);
-
-    res.json({ message: "Password reset successful" });
   }),
 
   getUserById: asyncHandler(async (req, res) => {

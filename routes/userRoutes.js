@@ -17,7 +17,8 @@ userRouter.put('/tools', userController.updateTool)
 userRouter.put('/clients', userController.updateClient)
 userRouter.get("/leaderboard", userController.getLeaderboard);
 userRouter.post("/forgot-password", userController.forgotPassword);
-userRouter.post("/reset-password/:token", userController.resetPassword);
+userRouter.post("/verify-otp", userController.verifyResetOTP);
+userRouter.post("/reset-password", userController.resetPassword);
 userRouter.post("/logout", userAuthentication, userController.logout)
 
 // Specific user routes (must come after static routes like /team, /leaderboard to avoid conflicts if IDs are not validated)
