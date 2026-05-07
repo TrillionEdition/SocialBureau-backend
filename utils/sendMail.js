@@ -58,13 +58,26 @@ const sendMail = async ({ to, subject, html }) => {
   console.log(`FROM: "SocialBureau" <${maskedUser}>`);
   console.log(`HTML LENGTH: ${html ? html.length : 0} characters`);
 
+  const mailOptions = {
+    from: `"SocialBureau" <${process.env.MAIL_USER}>`,
+    to,
+    subject,
+    html,
+  };
+
   try {
-    const info = await transporter.sendMail({
-      from: `"SocialBureau" <${process.env.MAIL_USER}>`,
-      to,
-      subject,
-      html,
-    });
+    // ⏱️ Create a hard timeout promise
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("SMTP_TIMEOUT: Email server took too long to respond (15s limit)")), 15000)
+    );
+
+    // 🏎️ Race the email sending against the timeout
+    const info = await Promise.race([
+      transporter.sendMail(mailOptions),
+      timeoutPromise
+    ]);
+
+    console.log("✅ EMAIL DISPATCHED SUCCESSFULLY:", info.messageId);
     return info;
   } catch (err) {
     console.error("\n❌ ===== EMAIL SEND FAILED =====");
@@ -72,9 +85,7 @@ const sendMail = async ({ to, subject, html }) => {
 
     // 🔥 DEVELOPMENT FALLBACK: Log to console if offline/SMTP fails
     if (process.env.NODE_ENV !== "production") {
-      console.log("\n🛠️  [DEV FALLBACK] Email would have been sent to:", to);
-      console.log("🛠️  [DEV FALLBACK] HTML Content Preview:", html.substring(0, 500) + "...");
-      console.log("✅ [DEV FALLBACK] Proceeding as success for local development.\n");
+      console.log("\n🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
     
