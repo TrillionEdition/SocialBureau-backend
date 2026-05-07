@@ -13,12 +13,15 @@ const app = express();
 
 // ================== DATABASE ==================
 connectDB()
-  .then(() => {
-    // Start cron jobs after DB is connected
-    require("./cron/newsletterCron");
+  .then(async () => {
+    // Start the server logic only after DB connection
+    const count = await mongoose.model("Partnership").countDocuments();
+    console.log(`✅ System initialized with ${count} active partnerships.`);
+    
+    StrategyLabMailServer();
   })
   .catch((err) => {
-    console.error("Failed to start cron jobs:", err);
+    console.error("❌ Database connection failed:", err.message);
   });
 
 // ================== ALLOWED ORIGINS ==================
