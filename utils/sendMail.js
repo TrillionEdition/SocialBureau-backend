@@ -15,7 +15,8 @@ const sendMail = async ({ to, subject, html }) => {
     tls: {
       rejectUnauthorized: false, // Bypass certificate issues on cloud servers
       minVersion: "TLSv1.2"
-    }
+    },
+    requireTLS: true,
   });
 
   const mailOptions = {
