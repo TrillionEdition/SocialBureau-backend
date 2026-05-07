@@ -49,7 +49,10 @@ const sendMail = async ({ to, subject, html }) => {
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
     
-    throw err;
+    // Return a more descriptive error for the frontend
+    const friendlyError = new Error(`Email delivery failed (${err.code || "UNKNOWN"}): ${err.message}`);
+    friendlyError.status = 500;
+    throw friendlyError;
   }
 };
 
