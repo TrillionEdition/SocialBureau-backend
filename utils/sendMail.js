@@ -21,23 +21,25 @@ const sendMail = async ({ to, subject, html }) => {
       host: "smtp.gmail.com",
       port: 465,
       secure: true,
+      family: 4, // 🔌 Force IPv4 to bypass Render IPv6 issues
       auth: {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASS,
       },
       tls: { rejectUnauthorized: false },
-      connectionTimeout: 8000, // 8s per attempt
+      connectionTimeout: 8000, 
     });
     return await transporter.sendMail(mailOptions);
   };
 
   // 2️⃣ Attempt 2: Port 587 (STARTTLS) - Fallback
   const tryPort587 = async () => {
-    console.log("⏱️  [MAILER] Port 465 failed or timed out. Falling back to Port 587 (TLS)...");
+    console.log("⏱️  [MAILER] Port 465 failed. Trying Port 587 (TLS) with IPv4...");
     const transporter = nodemailer.createTransport({
       host: "smtp.gmail.com",
       port: 587,
       secure: false,
+      family: 4, // 🔌 Force IPv4
       auth: {
         user: process.env.MAIL_USER,
         pass: process.env.MAIL_PASS,
