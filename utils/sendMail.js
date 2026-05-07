@@ -50,7 +50,6 @@ const sendMail = async ({ to, subject, html }) => {
   };
 
   try {
-    // 🔥 Start the retry sequence
     let info;
     try {
       info = await tryPort465();
