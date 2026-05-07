@@ -637,6 +637,13 @@ const userController = {
       throw new Error("Email not found in our security database.");
     }
 
+    // Safety check for production email configuration
+    if (!process.env.MAIL_USER) {
+      console.error("[AUTH ERROR] MAIL_USER is not configured in environment variables.");
+      res.status(500);
+      throw new Error("Server security configuration is incomplete. Please contact the administrator.");
+    }
+
     // Generate 6-digit numeric OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -651,32 +658,41 @@ const userController = {
     // Send OTP via email (Always send to the email they provided/requested)
     const targetEmail = email.toLowerCase().trim();
     
-    await sendMail({
-      to: targetEmail,
-      subject: "Verification Protocol - SocialBureau Identity",
-      html: `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
-        <div style="text-align: center; margin-bottom: 40px;">
-          <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
-          <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Security Verification Protocol</p>
-        </div>
-        
-        <p style="font-size: 16px; color: #ccc; line-height: 1.6;">A request was made to authorize a password reset for your account. Please use the following temporary access code:</p>
-        
-        <div style="text-align: center; margin: 40px 0;">
-          <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
-            <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+    console.log(`[AUTH] Attempting to send OTP to: ${targetEmail}`);
+
+    try {
+      await sendMail({
+        to: targetEmail,
+        subject: "Verification Protocol - SocialBureau Identity",
+        html: `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
+            <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Security Verification Protocol</p>
+          </div>
+          
+          <p style="font-size: 16px; color: #ccc; line-height: 1.6;">A request was made to authorize a password reset for your account. Please use the following temporary access code:</p>
+          
+          <div style="text-align: center; margin: 40px 0;">
+            <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
+              <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+            </div>
+          </div>
+          
+          <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this sequence, please secure your account immediately.</p>
+          
+          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
+            <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2024 SocialBureau // Identity Systems</p>
           </div>
         </div>
-        
-        <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this sequence, please secure your account immediately.</p>
-        
-        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
-          <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2024 SocialBureau // Identity Systems</p>
-        </div>
-      </div>
-    `,
-    });
+      `,
+      });
+      console.log(`[AUTH] OTP successfully sent to ${targetEmail}`);
+    } catch (mailError) {
+      console.error(`[AUTH] Failed to send OTP to ${targetEmail}:`, mailError.message);
+      res.status(500);
+      throw new Error(`Email delivery failed: ${mailError.message}. Please try again later or contact support.`);
+    }
 
     res.json({ success: true, message: "Verification code dispatched successfully." });
   }),
