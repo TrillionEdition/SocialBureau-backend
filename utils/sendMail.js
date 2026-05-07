@@ -33,15 +33,18 @@ if (process.env.MAIL_HOST) {
     greetingTimeout: 10000,
   });
 } else {
-  console.log("✅ Using default Gmail");
+  console.log("✅ Using default Gmail (Port 465)");
   transporter = nodemailer.createTransport({
     service: "gmail",
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true, // Use SSL
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.MAIL_PASS,
     },
     logger: true,
-    debug: process.env.MAIL_DEBUG === "true",
+    debug: true,
     connectionTimeout: 10000,
     greetingTimeout: 10000,
   });
