@@ -1,23 +1,11 @@
 const nodemailer = require("nodemailer");
 
+/**
+ * Robust Mailer with Multi-Port Retry Logic
+ * Specifically designed to bypass cloud firewall restrictions on Render/Vercel
+ */
 const sendMail = async ({ to, subject, html }) => {
-  console.log(`\n📤 [MAILER] Attempting dispatch to: ${to}`);
-
-  // 🚀 CLOUD-OPTIMIZED CONFIGURATION (Best for Render/Vercel)
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 587,
-    secure: false, // Must be false for Port 587
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.MAIL_PASS,
-    },
-    tls: {
-      rejectUnauthorized: false, // Bypass certificate issues on cloud servers
-      minVersion: "TLSv1.2"
-    },
-    requireTLS: true,
-  });
+  console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
   const mailOptions = {
     from: `"SocialBureau" <${process.env.MAIL_USER}>`,
@@ -26,31 +14,64 @@ const sendMail = async ({ to, subject, html }) => {
     html,
   };
 
-  try {
-    // ⏱️ 20-second timeout to give cloud networks enough time
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error("SMTP_TIMEOUT: The email server did not respond in time (20s).")), 20000)
-    );
+  // 1️⃣ Attempt 1: Port 465 (Direct SSL) - Most stable for cloud servers
+  const tryPort465 = async () => {
+    console.log("⏱️  [MAILER] Attempting Port 465 (SSL)...");
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASS,
+      },
+      tls: { rejectUnauthorized: false },
+      connectionTimeout: 8000, // 8s per attempt
+    });
+    return await transporter.sendMail(mailOptions);
+  };
 
-    const info = await Promise.race([
-      transporter.sendMail(mailOptions),
-      timeoutPromise
-    ]);
+  // 2️⃣ Attempt 2: Port 587 (STARTTLS) - Fallback
+  const tryPort587 = async () => {
+    console.log("⏱️  [MAILER] Port 465 failed or timed out. Falling back to Port 587 (TLS)...");
+    const transporter = nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 587,
+      secure: false,
+      auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASS,
+      },
+      tls: { rejectUnauthorized: false },
+      requireTLS: true,
+      connectionTimeout: 8000,
+    });
+    return await transporter.sendMail(mailOptions);
+  };
+
+  try {
+    // 🔥 Start the retry sequence
+    let info;
+    try {
+      info = await tryPort465();
+    } catch (firstErr) {
+      console.warn(`⚠️  [MAILER] Port 465 failed: ${firstErr.message}`);
+      info = await tryPort587();
+    }
 
     console.log("✅ [MAILER] Success! Message ID:", info.messageId);
     return info;
-  } catch (err) {
-    console.error("❌ [MAILER] Failed to send email.");
-    console.error("Error Code:", err.code);
-    console.error("Error Message:", err.message);
+  } catch (finalErr) {
+    console.error("❌ [MAILER] All connection attempts failed.");
+    console.error(`Final Error Message: ${finalErr.message}`);
 
     if (process.env.NODE_ENV !== "production") {
       console.log("🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
     
-    // Return a more descriptive error for the frontend
-    const friendlyError = new Error(`Email delivery failed (${err.code || "UNKNOWN"}): ${err.message}`);
+    // Return a descriptive error for the frontend
+    const friendlyError = new Error(`Email delivery failed (SMTP_ERROR): ${finalErr.message}. Please check if Gmail is blocking the server.`);
     friendlyError.status = 500;
     throw friendlyError;
   }
