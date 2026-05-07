@@ -16,6 +16,8 @@ if (process.env.MAIL_HOST) {
     },
     logger: true,
     debug: process.env.MAIL_DEBUG === "true",
+    connectionTimeout: 10000, // 10 seconds
+    greetingTimeout: 10000,   // 10 seconds
   });
 } else if (process.env.MAIL_SERVICE) {
   // console.log(`✅ Using MAIL_SERVICE: ${process.env.MAIL_SERVICE}`);
@@ -27,6 +29,8 @@ if (process.env.MAIL_HOST) {
     },
     logger: true,
     debug: process.env.MAIL_DEBUG === "true",
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
   });
 } else {
   console.log("✅ Using default Gmail");
@@ -38,6 +42,8 @@ if (process.env.MAIL_HOST) {
     },
     logger: true,
     debug: process.env.MAIL_DEBUG === "true",
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
   });
 }
 

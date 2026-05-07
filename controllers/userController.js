@@ -642,91 +642,108 @@ const userController = {
 
     // Store OTP in Redis/Memory with 10 minute expiry
     try {
-      // Use the email they provided as the key, so they can verify with the same email
+      console.log(`[OTP] Storing code for ${email.toLowerCase().trim()}: ${otp}`);
       await storeVerificationCode(email.toLowerCase().trim(), otp, 600);
     } catch (redisError) {
       console.warn("OTP Storage warning:", redisError.message);
-      // storeVerificationCode has an internal fallback, so we can continue
     }
 
     // Send OTP via email (Always send to the email they provided/requested)
     const targetEmail = email.toLowerCase().trim();
     
-    await sendMail({
-      to: targetEmail,
-      subject: "Verification Protocol - SocialBureau Identity",
-      html: `
-      <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
-        <div style="text-align: center; margin-bottom: 40px;">
-          <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
-          <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Security Verification Protocol</p>
-        </div>
-        
-        <p style="font-size: 16px; color: #ccc; line-height: 1.6;">A request was made to authorize a password reset for your account. Please use the following temporary access code:</p>
-        
-        <div style="text-align: center; margin: 40px 0;">
-          <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
-            <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+    console.log(`[AUTH] Attempting to send OTP to: ${targetEmail}`);
+
+    try {
+      await sendMail({
+        to: targetEmail,
+        subject: "Verification Protocol - SocialBureau Identity",
+        html: `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
+            <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Security Verification Protocol</p>
+          </div>
+          
+          <p style="font-size: 16px; color: #ccc; line-height: 1.6;">A request was made to authorize a password reset for your account. Please use the following temporary access code:</p>
+          
+          <div style="text-align: center; margin: 40px 0;">
+            <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
+              <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+            </div>
+          </div>
+          
+          <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this sequence, please secure your account immediately.</p>
+          
+          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
+            <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2024 SocialBureau // Identity Systems</p>
           </div>
         </div>
-        
-        <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this sequence, please secure your account immediately.</p>
-        
-        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
-          <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2024 SocialBureau // Identity Systems</p>
-        </div>
-      </div>
-    `,
-    });
+      `,
+      });
+      console.log(`[AUTH] OTP successfully sent to ${targetEmail}`);
+    } catch (mailError) {
+      console.error(`[AUTH] Failed to send OTP to ${targetEmail}:`, mailError.message);
+      res.status(500);
+      throw new Error(`Email delivery failed: ${mailError.message}. Please try again later or contact support.`);
+    }
 
     res.json({ success: true, message: "Verification code dispatched successfully." });
   }),
 
   verifyResetOTP: asyncHandler(async (req, res) => {
-    const { email, otp } = req.body;
+    try {
+      const { email, otp } = req.body;
 
-    if (!email || !otp) {
-      res.status(400);
-      throw new Error("Email and OTP are required");
-    }
-
-    const normalizedEmail = email.toLowerCase().trim();
-    const storedOtp = await getVerificationCode(normalizedEmail);
-
-    if (!storedOtp || storedOtp !== otp) {
-      res.status(400);
-      throw new Error("Invalid or expired OTP");
-    }
-
-    // Remove OTP after verification
-    await removeVerificationCode(normalizedEmail);
-    
-    // Find the actual user primary email to put in the token
-    // This ensures resetPassword (which looks by email) finds the right account
-    let accountEmail = normalizedEmail;
-    const primaryUser = await User.findOne({ email: normalizedEmail });
-    
-    if (!primaryUser) {
-      // If not a primary email, check if it's a partnership email
-      const partner = await Partnership.findOne({ email: normalizedEmail }).populate("user");
-      if (partner && partner.user) {
-        accountEmail = partner.user.email;
-        console.log(`[AUTH] Mapping partnership email ${normalizedEmail} to account email ${accountEmail}`);
+      if (!email || !otp) {
+        res.status(400);
+        throw new Error("Email and OTP are required");
       }
+
+      const normalizedEmail = email.toLowerCase().trim();
+      const storedOtp = await getVerificationCode(normalizedEmail);
+
+      console.log(`[OTP] Verifying for ${normalizedEmail}. Provided: ${otp}, Stored: ${storedOtp}`);
+
+      if (!storedOtp || storedOtp !== otp) {
+        console.log(`[OTP] Mismatch or expired for ${normalizedEmail}`);
+        res.status(400);
+        throw new Error("Invalid or expired OTP");
+      }
+
+      // Remove OTP after verification
+      await removeVerificationCode(normalizedEmail);
+      
+      // Find the actual user primary email to put in the token
+      // This ensures resetPassword (which looks by email) finds the right account
+      let accountEmail = normalizedEmail;
+      const primaryUser = await User.findOne({ email: normalizedEmail });
+      
+      if (!primaryUser) {
+        // If not a primary email, check if it's a partnership email
+        const partner = await Partnership.findOne({ email: normalizedEmail }).populate("user");
+        if (partner && partner.user) {
+          accountEmail = partner.user.email;
+          console.log(`[AUTH] Mapping partnership email ${normalizedEmail} to account email ${accountEmail}`);
+        }
+      }
+
+      // Generate a temporary signed token for password reset (valid for 5 minutes)
+      const resetToken = jwt.sign(
+        { email: accountEmail, type: "password_reset" },
+        process.env.JWT_SECRET_KEY,
+        { expiresIn: "5m" }
+      );
+
+      res.json({
+        success: true,
+        message: "OTP verified successfully",
+        resetToken,
+      });
+    } catch (error) {
+      console.error("[OTP ERROR] Verification failed:", error.message, error.stack);
+      if (res.statusCode === 200) res.status(500);
+      throw error;
     }
-
-    // Generate a temporary signed token for password reset (valid for 5 minutes)
-    const resetToken = jwt.sign(
-      { email: accountEmail, type: "password_reset" },
-      process.env.JWT_SECRET_KEY,
-      { expiresIn: "5m" }
-    );
-
-    res.json({
-      success: true,
-      message: "OTP verified successfully",
-      resetToken,
-    });
   }),
 
   resetPassword: asyncHandler(async (req, res) => {
