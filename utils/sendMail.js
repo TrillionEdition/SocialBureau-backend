@@ -19,32 +19,30 @@ if (process.env.MAIL_HOST) {
     connectionTimeout: 10000, // 10 seconds
     greetingTimeout: 10000,   // 10 seconds
   });
-} else if (process.env.MAIL_SERVICE) {
-  // console.log(`✅ Using MAIL_SERVICE: ${process.env.MAIL_SERVICE}`);
-  transporter = nodemailer.createTransport({
-    service: process.env.MAIL_SERVICE,
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.MAIL_PASS,
-    },
-    logger: true,
-    debug: process.env.MAIL_DEBUG === "true",
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-  });
-} else {
-  console.log("✅ Using default Gmail (Port 465)");
+} else if (process.env.MAIL_SERVICE === "gmail" || (!process.env.MAIL_HOST && !process.env.MAIL_SERVICE)) {
+  console.log("✅ Using Optimized Gmail (Port 465)");
   transporter = nodemailer.createTransport({
     service: "gmail",
     host: "smtp.gmail.com",
     port: 465,
-    secure: true, // Use SSL
+    secure: true,
     auth: {
       user: process.env.MAIL_USER,
       pass: process.env.MAIL_PASS,
     },
     logger: true,
     debug: true,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+  });
+} else if (process.env.MAIL_SERVICE) {
+  console.log(`✅ Using MAIL_SERVICE: ${process.env.MAIL_SERVICE}`);
+  transporter = nodemailer.createTransport({
+    service: process.env.MAIL_SERVICE,
+    auth: {
+      user: process.env.MAIL_USER,
+      pass: process.env.MAIL_PASS,
+    },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
   });
