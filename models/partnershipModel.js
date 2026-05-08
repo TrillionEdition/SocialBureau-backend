@@ -17,6 +17,7 @@ const partnershipSchema = new mongoose.Schema(
       default: "",
       trim: true,
       lowercase: true,
+      index: true,
     },
     category: {
       type: String,

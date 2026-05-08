@@ -38,8 +38,9 @@ redisClient.connect().catch((err) => {
     isConnected = false;
 });
 
-// In-memory fallback cache
+// In-memory fallback cache with timeout tracking
 const inMemoryCache = new Map();
+const inMemoryTimeouts = new Map();
 
 // Async methods with fallback
 const getAsync = async (key) => {
@@ -72,9 +73,20 @@ const setexAsync = async (key, seconds, value) => {
     } catch (err) {
         // Fall back to in-memory
     }
+    
+    // Clear existing timeout for this key if it exists
+    if (inMemoryTimeouts.has(key)) {
+        clearTimeout(inMemoryTimeouts.get(key));
+    }
+
     // Set in-memory with expiration
     inMemoryCache.set(key, value);
-    setTimeout(() => inMemoryCache.delete(key), seconds * 1000);
+    const timeout = setTimeout(() => {
+        inMemoryCache.delete(key);
+        inMemoryTimeouts.delete(key);
+    }, seconds * 1000);
+    
+    inMemoryTimeouts.set(key, timeout);
 };
 
 const delAsync = async (keys) => {
@@ -87,7 +99,13 @@ const delAsync = async (keys) => {
         // Fall back to in-memory
     }
     const keyArray = Array.isArray(keys) ? keys : [keys];
-    keyArray.forEach(key => inMemoryCache.delete(key));
+    keyArray.forEach(key => {
+        inMemoryCache.delete(key);
+        if (inMemoryTimeouts.has(key)) {
+            clearTimeout(inMemoryTimeouts.get(key));
+            inMemoryTimeouts.delete(key);
+        }
+    });
 };
 
 const flushdbAsync = async () => {
