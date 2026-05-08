@@ -32,12 +32,12 @@ const ajnoraController = {
         if (req.files && req.files.length > 0) {
           req.files.forEach((file) => {
             if (file.fieldname === "brandFace") {
-              req.body.brandFaceLink = file.path;
+              req.body.brandFaceLink = file.location;
             } else if (file.fieldname.startsWith("partner_photo_")) {
               const index = parseInt(file.fieldname.replace("partner_photo_", ""));
               if (Array.isArray(req.body.partnersList) && req.body.partnersList[index]) {
                 if (!req.body.partnersList[index].photo) req.body.partnersList[index].photo = {};
-                req.body.partnersList[index].photo.url = file.path;
+                req.body.partnersList[index].photo.url = file.location;
               }
             } else {
               if (!uploadedFilesMap[file.fieldname]) {
@@ -45,7 +45,7 @@ const ajnoraController = {
               }
               uploadedFilesMap[file.fieldname].push({
                 name: file.originalname,
-                url: file.path,
+                url: file.location,
                 type: file.mimetype,
                 size: (file.size / 1024).toFixed(2) + ' KB',
                 uploadedAt: new Date().toISOString()
@@ -127,12 +127,12 @@ const ajnoraController = {
         if (req.files && req.files.length > 0) {
           req.files.forEach((file) => {
             if (file.fieldname === "brandFace") {
-              req.body.brandFaceLink = file.path;
+              req.body.brandFaceLink = file.location;
             } else if (file.fieldname.startsWith("partner_photo_")) {
               const index = parseInt(file.fieldname.replace("partner_photo_", ""));
               if (Array.isArray(req.body.partnersList) && req.body.partnersList[index]) {
                 if (!req.body.partnersList[index].photo) req.body.partnersList[index].photo = {};
-                req.body.partnersList[index].photo.url = file.path;
+                req.body.partnersList[index].photo.url = file.location;
               }
             } else {
               if (!uploadedFilesMap[file.fieldname]) {
@@ -140,7 +140,7 @@ const ajnoraController = {
               }
               uploadedFilesMap[file.fieldname].push({
                 name: file.originalname,
-                url: file.path,
+                url: file.location,
                 type: file.mimetype,
                 size: (file.size / 1024).toFixed(2) + ' KB',
                 uploadedAt: new Date().toISOString()

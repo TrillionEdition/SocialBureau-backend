@@ -43,7 +43,7 @@ const blogController = {
       contentArray = contentArray.map((section, index) => {
         const sectionImageKey = `sectionImage_${index}`;
         if (files[sectionImageKey] && files[sectionImageKey][0]) {
-          section.image = files[sectionImageKey][0].path; // Cloudinary URL
+          section.image = files[sectionImageKey][0].location; // R2 URL
         }
         return section;
       });
@@ -65,7 +65,7 @@ const blogController = {
       // Get main blog image URL from uploaded file
       let imageUrl = null;
       if (files.image && files.image[0]) {
-        imageUrl = files.image[0].path; // Cloudinary URL
+        imageUrl = files.image[0].location; // R2 URL
       } else if (req.body.imageUrl) {
         imageUrl = req.body.imageUrl; // Fallback to URL if provided
       }
