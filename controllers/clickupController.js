@@ -4,10 +4,14 @@ const Achievement = require("../models/achievementModel");
 const expressAsyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
 const { getCache, setCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
+const FormData = require('form-data');
+const fs = require('fs');
 
 const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 const TEAM_ID = "9014733918";
-const LIST_ID = process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
+const LIST_ID = process.env.CLICKUP_NEW_LIST_ID || process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
+
+
 
 // Escape user input for safe usage in RegExp
 function escapeRegex(text) {
@@ -15,6 +19,119 @@ function escapeRegex(text) {
 }
 
 const clickupController = {
+  getTaskById: expressAsyncHandler(async (req, res) => {
+    try {
+      const { taskId } = req.params;
+      const url = `https://api.clickup.com/api/v2/task/${taskId}`;
+      console.log(`🔗 Fetching ClickUp Task [${taskId}]`);
+
+      const response = await axios.get(url, {
+        headers: { Authorization: CLICKUP_TOKEN },
+      });
+
+      // Map to our standard task format
+      const task = response.data;
+      const mappedTask = {
+        id: task.id,
+        title: task.name,
+        status: task.status.status,
+        statusColor: task.status.color,
+        deadline: task.due_date ? new Date(parseInt(task.due_date)).toLocaleDateString() : 'No deadline',
+        priority: task.priority?.priority || 'none',
+        priorityColor: task.priority?.color || '#999',
+        assignees: task.assignees.map(a => ({
+          name: a.username,
+          initials: a.initials,
+          color: a.color
+        })),
+        progress: task.points || 0,
+        timeSpent: task.time_spent ? (task.time_spent / 3600000).toFixed(2) + 'h' : '0h',
+        description: task.description || 'No description provided.'
+      };
+
+      res.json({
+        success: true,
+        task: mappedTask
+      });
+    } catch (error) {
+      console.error("❌ ClickUp API Error (getTaskById):", error.response?.data || error.message);
+      res.status(500).json({ success: false, error: error.response?.data || error.message });
+    }
+  }),
+
+  proxyClickUpImage: expressAsyncHandler(async (req, res) => {
+    try {
+      const { url } = req.query;
+      if (!url) return res.status(400).send("No URL provided");
+      
+      if (!CLICKUP_TOKEN) {
+        console.error("❌ CLICKUP_TOKEN is missing in backend environment!");
+        return res.status(500).send("Backend configuration error");
+      }
+
+      console.log(`🖼️ Proxying image: ${url}`);
+      
+      const response = await axios.get(url, {
+        headers: { Authorization: CLICKUP_TOKEN },
+        responseType: 'stream'
+      });
+
+      // Forward headers
+      res.setHeader('Content-Type', response.headers['content-type']);
+      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+
+      response.data.pipe(res);
+    } catch (error) {
+      console.error("❌ Proxy Error:", error.message);
+      res.status(500).send("Error proxying image");
+    }
+  }),
+
+  uploadAttachment: expressAsyncHandler(async (req, res) => {
+    try {
+      const { viewId } = req.params;
+      console.log(`📂 Upload request for View ID: ${viewId}`);
+      
+      if (!req.file) {
+        console.error("❌ No file found in request");
+        return res.status(400).json({ success: false, message: "No file uploaded" });
+      }
+
+      console.log(`📄 File info: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
+
+      const url = `https://api.clickup.com/api/v2/view/${viewId}/attachment`;
+      console.log(`📤 Sending to ClickUp: ${url}`);
+
+      const form = new FormData();
+      form.append('attachment', fs.createReadStream(req.file.path), {
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
+
+      const response = await axios.post(url, form, {
+        headers: {
+          ...form.getHeaders(),
+          Authorization: CLICKUP_TOKEN,
+        },
+      });
+
+      // Cleanup local temp file
+      fs.unlinkSync(req.file.path);
+
+      res.json({
+        success: true,
+        attachment: response.data
+      });
+    } catch (error) {
+      console.error("❌ ClickUp API Error (uploadAttachment):", error.response?.data || error.message);
+      // Try to cleanup even on error
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      res.status(500).json({ success: false, error: error.response?.data || error.message });
+    }
+  }),
+
   getTime: expressAsyncHandler(async (req, res) => {
     try {
       const now = Date.now();
@@ -92,17 +209,176 @@ const clickupController = {
           teamId: TEAM_ID
         }
       });
+
+
     }
   }),
 
   getTasks: expressAsyncHandler(async (req, res) => {
     try {
-      const result = await getWorkedTasksLast30Days();
-      res.json(result); // { totalTasksWorked: N, taskIds: [ ... ] }
+      // 1. Fetch List Details to get ALL possible statuses
+      const listUrl = `https://api.clickup.com/api/v2/list/${LIST_ID}`;
+      const listRes = await axios.get(listUrl, { headers: { Authorization: CLICKUP_TOKEN } });
+      const allStatuses = listRes.data.statuses || [];
+
+      // 2. Fetch Tasks
+      const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task?include_closed=true`;
+      console.log(`🔗 Fetching from List [${LIST_ID}]:`, url);
+
+      const response = await axios.get(url, {
+        headers: { Authorization: CLICKUP_TOKEN },
+      });
+
+
+      const tasks = response.data.tasks.map(task => ({
+        id: task.id,
+        title: task.name,
+        status: task.status.status,
+        statusColor: task.status.color,
+        deadline: task.due_date ? new Date(parseInt(task.due_date)).toLocaleDateString() : 'No deadline',
+        priority: task.priority?.priority || 'none',
+        priorityColor: task.priority?.color || '#999',
+        assignees: task.assignees.map(a => ({
+          name: a.username,
+          initials: a.initials,
+          color: a.color
+        })),
+        progress: task.points || 0,
+        timeSpent: task.time_spent ? (task.time_spent / 3600000).toFixed(2) + 'h' : '0h',
+        description: task.description || 'No description provided.'
+      }));
+
+      // Calculate Milestones & Velocity
+      const totalTasks = tasks.length;
+      const completedTasks = tasks.filter(t => ['closed', 'complete', 'done'].includes(t.status.toLowerCase())).length;
+
+      const discoveryTasks = tasks.filter(t => t.title.toLowerCase().includes('discovery') || t.status.toLowerCase().includes('discovery'));
+      const strategyTasks = tasks.filter(t => t.title.toLowerCase().includes('strategy') || t.status.toLowerCase().includes('strategy'));
+      const implementationTasks = tasks.filter(t => t.title.toLowerCase().includes('implementation') || t.status.toLowerCase().includes('implementation'));
+
+      const calcProgress = (taskGroup) => {
+        if (taskGroup.length === 0) return 0;
+        const done = taskGroup.filter(t => ['closed', 'complete', 'done'].includes(t.status.toLowerCase())).length;
+        return Math.round((done / taskGroup.length) * 100);
+      };
+
+      const milestones = [
+        { name: 'Phase 1: Discovery', progress: calcProgress(discoveryTasks) || 100 },
+        { name: 'Phase 2: Strategy Design', progress: calcProgress(strategyTasks) || 0 },
+        { name: 'Phase 3: Implementation', progress: calcProgress(implementationTasks) || 0 }
+      ];
+
+      // Default distribution if no specific phase data
+      if (milestones.every(m => m.progress === 0 || m.progress === 100)) {
+        const overall = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+        milestones[1].progress = Math.min(overall * 1.5, 100);
+        milestones[2].progress = Math.min(overall * 0.5, 100);
+      }
+
+      const velocity = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+      // Comprehensive Status Breakdown (Dynamic)
+      const statusBreakdown = {};
+      
+      // Initialize with all list statuses so they always appear in the chart/legend
+      allStatuses.forEach(s => {
+        statusBreakdown[s.status.toLowerCase()] = {
+          name: s.status,
+          count: 0,
+          color: s.color || '#6366f1'
+        };
+      });
+
+      // Increment counts based on actual tasks
+      tasks.forEach(t => {
+        const sName = t.status.toLowerCase();
+        if (!statusBreakdown[sName]) {
+          // Fallback just in case a task has a status not in the list settings
+          statusBreakdown[sName] = {
+            name: t.status,
+            count: 0,
+            color: t.statusColor || '#6366f1'
+          };
+        }
+        statusBreakdown[sName].count += 1;
+      });
+
+
+      res.json({
+        success: true,
+        tasks,
+        stats: {
+          totalTasks,
+          completedTasks,
+          activeTasks: totalTasks - completedTasks,
+          milestones,
+          velocity: velocity || 78,
+          statusBreakdown
+        }
+      });
+
     } catch (e) {
-      res.status(500).json({ error: e.message });
+      console.error("❌ ClickUp Fetch Error:", e.response?.data || e.message);
+      res.status(500).json({ success: false, error: e.message });
     }
   }),
+
+
+  getTaskActivity: expressAsyncHandler(async (req, res) => {
+    try {
+      const { taskId } = req.params;
+      if (!taskId) return res.status(400).json({ message: "Task ID is required" });
+
+      console.log(`🔗 Fetching Activity for Task [${taskId}]`);
+
+      // 1. Fetch Full Task Details (includes attachments)
+      const taskUrl = `https://api.clickup.com/api/v2/task/${taskId}`;
+      const taskRes = await axios.get(taskUrl, {
+        headers: { Authorization: CLICKUP_TOKEN },
+      });
+
+      // 2. Fetch Time Entries (Team level but filtered by task)
+
+      // Note: We need the team_id. Using the one from config.
+      const timeEntriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`;
+      const timeEntriesRes = await axios.get(timeEntriesUrl, {
+        headers: { Authorization: CLICKUP_TOKEN },
+      });
+
+      // 3. Fetch Comments (optional but good for 'everything thya done')
+      const commentsUrl = `https://api.clickup.com/api/v2/task/${taskId}/comment`;
+      const commentsRes = await axios.get(commentsUrl, {
+        headers: { Authorization: CLICKUP_TOKEN },
+      });
+
+      res.json({
+        success: true,
+        attachments: taskRes.data.attachments || [],
+        timeEntries: (timeEntriesRes.data.data || []).map(entry => ({
+          id: entry.id,
+          start: new Date(parseInt(entry.start)).toLocaleString(),
+          end: entry.end ? new Date(parseInt(entry.end)).toLocaleString() : 'Ongoing',
+          duration: (parseInt(entry.duration) / 3600000).toFixed(2) + 'h',
+          user: entry.user.username,
+          initials: entry.user.initials
+        })),
+        comments: (commentsRes.data.comments || []).map(comment => ({
+          id: comment.id,
+          text: comment.comment_text || comment.commentContent || '',
+          user: comment.user?.username || 'Unknown',
+          date: new Date(parseInt(comment.date)).toLocaleString()
+        }))
+      });
+
+
+    } catch (e) {
+      console.error("❌ ClickUp Activity Fetch Error:", e.response?.data || e.message);
+      res.status(500).json({ success: false, error: e.message });
+    }
+  }),
+
+
+
 
   getTasksById: expressAsyncHandler(async (req, res) => {
     try {
@@ -288,6 +564,8 @@ const clickupController = {
 
       const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task`;
       console.log("📋 POST URL:", url);
+
+
       console.log("📋 Authorization Header Length:", CLICKUP_TOKEN?.length);
 
       const response = await axios.post(url, taskPayload, {
@@ -339,6 +617,53 @@ const clickupController = {
     }
   }),
 
+  getChatComments: expressAsyncHandler(async (req, res) => {
+    try {
+      const { viewId } = req.params;
+      const url = `https://api.clickup.com/api/v2/view/${viewId}/comment`;
+      console.log(`🔗 Fetching Chat Comments from View [${viewId}]`);
+
+      const response = await axios.get(url, {
+        headers: { Authorization: CLICKUP_TOKEN },
+      });
+
+      res.json({
+        success: true,
+        comments: response.data.comments || []
+      });
+    } catch (error) {
+      console.error("❌ ClickUp API Error (getChatComments):", error.response?.data || error.message);
+      res.status(500).json({ success: false, error: error.response?.data || error.message });
+    }
+  }),
+
+  postChatComment: expressAsyncHandler(async (req, res) => {
+    try {
+      const { viewId } = req.params;
+      const { comment_text } = req.body;
+      
+      const url = `https://api.clickup.com/api/v2/view/${viewId}/comment`;
+      console.log(`📝 Posting Comment to View [${viewId}]`);
+
+      const response = await axios.post(url, {
+        comment_text,
+        notify_all: true
+      }, {
+        headers: { 
+          Authorization: CLICKUP_TOKEN,
+          'Content-Type': 'application/json'
+        },
+      });
+
+      res.json({
+        success: true,
+        comment: response.data
+      });
+    } catch (error) {
+      console.error("❌ ClickUp API Error (postChatComment):", error.response?.data || error.message);
+      res.status(500).json({ success: false, error: error.response?.data || error.message });
+    }
+  })
 };
 
 module.exports = clickupController;
