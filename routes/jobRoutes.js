@@ -24,28 +24,30 @@ const {
   getJobBySlug,
   updateJob,
   deleteJob,
-  deactivateJob,
+  toggleJobStatus,
 } = require("../controllers/jobController");
 const userAuthentication = require("../middlewares/userAuthentication");
+const optionalAuthentication = require("../middlewares/optionalAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
+const upload = require("../middlewares/cloudinary");
 
-// CREATE JOB (admin only)
-jobRoutes.post("/", userAuthentication, isAdmin, createJob);
+// CREATE JOB (admin/hr only)
+jobRoutes.post("/", userAuthentication, isAdmin, upload.single("image"), createJob);
 
-// GET ALL JOBS (with caching)
-jobRoutes.get("/", getJobs);
+// GET ALL JOBS (with optional auth for admin visibility)
+jobRoutes.get("/", optionalAuthentication, getJobs);
 
 // GET SINGLE JOB BY SLUG (with caching)
 jobRoutes.get("/:slug", getJobBySlug);
 
-// UPDATE JOB (admin only) - Optional
-jobRoutes.put("/:id", userAuthentication, isAdmin, updateJob);
+// UPDATE JOB (admin/hr only)
+jobRoutes.put("/:id", userAuthentication, isAdmin, upload.single("image"), updateJob);
 
 // DELETE JOB (admin only) - Optional
 jobRoutes.delete("/:id", userAuthentication, isAdmin, deleteJob);
 
-// DEACTIVATE JOB (soft delete - admin only) - Optional
-jobRoutes.patch("/:id/deactivate", userAuthentication, isAdmin, deactivateJob);
+// DEACTIVATE/ACTIVATE JOB (toggle - admin/hr only)
+jobRoutes.patch("/:id/toggle", userAuthentication, isAdmin, toggleJobStatus);
 
 // DEBUG ENDPOINT - Get all jobs (active and inactive) for troubleshooting
 jobRoutes.get("/debug/all", async (req, res) => {

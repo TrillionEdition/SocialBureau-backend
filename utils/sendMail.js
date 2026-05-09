@@ -63,7 +63,7 @@ const sendMail = async ({ to, subject, html }) => {
       console.log("🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
-    
+
     throw new Error(`Email delivery failed: ${err.message}`);
   }
 };

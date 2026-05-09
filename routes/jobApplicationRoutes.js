@@ -30,6 +30,10 @@ jobApplicationRoutes.get('/job-applicants/:jobId', jobApplicationController.getA
 jobApplicationRoutes.put('/update-status/:applicationId', jobApplicationController.updateStatus);
 jobApplicationRoutes.post('/add-message/:applicationId', jobApplicationController.addMessage);
 jobApplicationRoutes.post('/bulk-message', jobApplicationController.bulkMessage);
+const isAdmin = require('../middlewares/isAdmin');
+const authenticate = require('../middlewares/userAuthentication');
+
+jobApplicationRoutes.get('/all-applications', authenticate, isAdmin, jobApplicationController.getAllApplications);
 jobApplicationRoutes.get('/conversations/:userId', jobApplicationController.getUserConversations);
 
 module.exports = jobApplicationRoutes;

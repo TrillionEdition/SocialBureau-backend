@@ -29,6 +29,7 @@ const jobSchema = new mongoose.Schema(
 
     img: [String],
     link: String,
+    applicationLink: String, // Google Form or external link
 
     isActive: { type: Boolean, default: true },
   },
