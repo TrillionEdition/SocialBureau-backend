@@ -1,4 +1,5 @@
 require("dotenv").config();
+// Final restart to ensure all routes including image-proxy are active
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./database/connectDB");
@@ -30,7 +31,10 @@ const allowedOrigins = [
 ];
 
 // ================== MIDDLEWARE ==================
-app.use(helmet());
+app.use(helmet({
+  crossOriginResourcePolicy: false,
+  contentSecurityPolicy: false,
+}));
 
 app.use(
   cors({

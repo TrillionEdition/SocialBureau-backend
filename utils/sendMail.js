@@ -5,31 +5,41 @@ const dns = require("dns");
 dns.setDefaultResultOrder("ipv4first");
 
 /**
- * GMAIL CLOUD-OPTIMIZED MAILER (IPv4 Force)
- * Uses dns.setDefaultResultOrder("ipv4first") to bypass Render's IPv6 timeout issues.
+ * PRODUCTION-READY MAILER
+ * Supports Gmail (Local) and SendGrid (Production/Render)
+ * Port 2525 is used for SendGrid to bypass Render's firewall blocks.
  */
 const sendMail = async ({ to, subject, html }) => {
-  console.log(`\n📤 [MAILER] Attempting IPv4-forced dispatch to: ${to}`);
+  console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
-  const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // SSL
-    auth: {
-      user: process.env.MAIL_USER,
-      pass: process.env.MAIL_PASS,
-    },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 30000,
-    tls: {
-      rejectUnauthorized: false,
-      minVersion: "TLSv1.2",
-    },
-  });
+  let transporter;
+
+  // 🛡️ MODE 1: SendGrid (Recommended for Render)
+  if (process.env.SENDGRID_API_KEY) {
+    console.log("🚀 [MAILER] Using SendGrid on Port 2525 (Render Optimized)");
+    transporter = nodemailer.createTransport({
+      host: "smtp.sendgrid.net",
+      port: 2525, // Bypasses Render's firewall blocks
+      auth: {
+        user: "apikey", // This is literally the string "apikey"
+        pass: process.env.SENDGRID_API_KEY,
+      },
+    });
+  } 
+  // 🛡️ MODE 2: Gmail (Fallback/Local)
+  else {
+    console.log("⏱️  [MAILER] No SendGrid key found. Falling back to Gmail...");
+    transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASS,
+      },
+    });
+  }
 
   const mailOptions = {
-    from: `"SocialBureau" <${process.env.MAIL_USER}>`,
+    from: `"SocialBureau" <${process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER}>`,
     to,
     subject,
     html,
@@ -40,16 +50,15 @@ const sendMail = async ({ to, subject, html }) => {
     console.log("✅ [MAILER] Success! Message ID:", info.messageId);
     return info;
   } catch (err) {
-    console.error("❌ [MAILER] IPv4 Dispatch Failed.");
-    console.error(`Error Type: ${err.name}`);
-    console.error(`Error Message: ${err.message}`);
+    console.error("❌ [MAILER] Email Dispatch Failed.");
+    console.error(`Error: ${err.message}`);
 
     if (process.env.NODE_ENV !== "production") {
       console.log("🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
     
-    throw new Error(`Email delivery failed: ${err.message}. This is likely a firewall block by Render.`);
+    throw new Error(`Email delivery failed: ${err.message}. If using Render, please provide a SENDGRID_API_KEY and ensure it's not a firewall block.`);
   }
 };
 

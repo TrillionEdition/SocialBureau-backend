@@ -1,13 +1,23 @@
 const express = require("express");
 const clickupController = require("../controllers/clickupController");
 const clickupRoutes = express.Router();
+const multer = require('multer');
+const upload = multer({ dest: 'uploads/' }); // Temporary storage before proxying to ClickUp
+
 
 clickupRoutes.get('/tasks', clickupController.getTasks);
+clickupRoutes.get('/tasks/:taskId', clickupController.getTaskById);
 clickupRoutes.get('/time', clickupController.getTime);
 clickupRoutes.get('/user-task', clickupController.getTasksById);
 clickupRoutes.get('/user-details', clickupController.getUserDetails);
 clickupRoutes.get('/test', clickupController.testClickUp);
+clickupRoutes.get('/tasks/:taskId/activity', clickupController.getTaskActivity);
 clickupRoutes.post('/create-task', clickupController.createTask);
+clickupRoutes.get('/chat-messages/:viewId', clickupController.getChatComments);
+clickupRoutes.post('/chat-messages/:viewId', clickupController.postChatComment);
+clickupRoutes.post('/chat-messages/:viewId/attachment', upload.single('attachment'), clickupController.uploadAttachment);
+clickupRoutes.get('/image-proxy', clickupController.proxyClickUpImage);
+
 
 // Test form for debugging
 clickupRoutes.get('/test-form', (req, res) => {
