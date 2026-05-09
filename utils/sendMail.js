@@ -1,8 +1,12 @@
 const nodemailer = require("nodemailer");
+const dns = require("dns");
+
+// Force IPv4 DNS resolution globally — fixes Render's IPv6-default timeout with Gmail SMTP
+dns.setDefaultResultOrder("ipv4first");
 
 /**
  * GMAIL CLOUD-OPTIMIZED MAILER (IPv4 Force)
- * This version forces IPv4 to bypass Render's common IPv6 timeout issues.
+ * Uses dns.setDefaultResultOrder("ipv4first") to bypass Render's IPv6 timeout issues.
  */
 const sendMail = async ({ to, subject, html }) => {
   console.log(`\n📤 [MAILER] Attempting IPv4-forced dispatch to: ${to}`);
@@ -15,19 +19,13 @@ const sendMail = async ({ to, subject, html }) => {
       user: process.env.MAIL_USER,
       pass: process.env.MAIL_PASS,
     },
-    // 🛡️ Force IPv4 and add robust timeouts
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 30000,
-    dnsTimeout: 10000,
-    // 🔥 The "Magic" setting for Render: Force IPv4
-    socket: {
-      family: 4
-    },
     tls: {
       rejectUnauthorized: false,
-      minVersion: "TLSv1.2"
-    }
+      minVersion: "TLSv1.2",
+    },
   });
 
   const mailOptions = {
