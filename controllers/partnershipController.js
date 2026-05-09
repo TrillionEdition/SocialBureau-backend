@@ -306,7 +306,7 @@ const partnershipController = {
     
     res.json({
       success: true,
-      url: req.file.path, // Cloudinary URL
+      url: req.file.location, // R2 URL
       message: "Image uploaded successfully"
     });
   }),

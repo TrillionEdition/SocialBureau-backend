@@ -58,4 +58,18 @@ const sendMail = async ({ to, subject, html }) => {
   }
 };
 
+// Verify transporter on startup ONLY if credentials exist
+if (mailUser && mailPass) {
+  transporter
+    .verify()
+    .then(() => {
+      console.log("✅ [MAILER] Verified and Ready (IPv4 Forced)");
+    })
+    .catch((err) => {
+      console.warn("⚠️  [MAILER] Verification Failed. This may be due to temporary network issues.");
+      console.warn(`Reason: ${err.message}`);
+    });
+}
+
 module.exports = sendMail;
+module.exports.transporter = transporter;

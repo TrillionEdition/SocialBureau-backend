@@ -17,6 +17,10 @@ const blogController = {
   // Create a new blog post
   createBlog: expressAsyncHandler(async (req, res) => {
     try {
+      console.log('📥 Incoming Create Blog Request');
+      console.log('Body Keys:', Object.keys(req.body));
+      console.log('Files:', req.files ? Object.keys(req.files) : 'None');
+
       const { title, excerpt, content, category, author, slug, customUrl, keywords, childBlogs, seoTitle, seoDescription } = req.body;
 
       // Get user ID from authenticated request
@@ -43,7 +47,7 @@ const blogController = {
       contentArray = contentArray.map((section, index) => {
         const sectionImageKey = `sectionImage_${index}`;
         if (files[sectionImageKey] && files[sectionImageKey][0]) {
-          section.image = files[sectionImageKey][0].path; // Cloudinary URL
+          section.image = files[sectionImageKey][0].location; // R2 URL
         }
         return section;
       });
@@ -65,7 +69,7 @@ const blogController = {
       // Get main blog image URL from uploaded file
       let imageUrl = null;
       if (files.image && files.image[0]) {
-        imageUrl = files.image[0].path; // Cloudinary URL
+        imageUrl = files.image[0].location; // R2 URL
       } else if (req.body.imageUrl) {
         imageUrl = req.body.imageUrl; // Fallback to URL if provided
       }
@@ -141,6 +145,10 @@ const blogController = {
         const messages = Object.values(err.errors).map(val => val.message);
         return sendError(res, 400, 'Validation Error', messages.join(', '));
       }
+      if (err.code === 11000) {
+        const field = Object.keys(err.keyPattern || {})[0] || 'field';
+        return sendError(res, 400, `Duplicate Error: A blog with this ${field} already exists.`);
+      }
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),
@@ -148,13 +156,18 @@ const blogController = {
   // List blogs
   getBlogs: expressAsyncHandler(async (req, res) => {
     try {
-      const { category, limit = 10, published = 'true' } = req.query;
+      const { category, limit = 10, published } = req.query;
       console.log('📚 getBlogs called with params:', { category, limit, published });
 
-      // Convert published string to boolean
-      const isPublished = published === 'true' || published === true;
-
-      let query = { published: isPublished };
+      let query = {};
+      if (published === 'all') {
+        // Show everything
+      } else if (published === 'false') {
+        query.published = false;
+      } else {
+        // Default: only show published
+        query.published = true;
+      }
       if (category && category !== 'All Posts') {
         query.category = category;
       }
@@ -231,21 +244,90 @@ const blogController = {
   // Update blog
   updateBlog: expressAsyncHandler(async (req, res) => {
     try {
-      const { slug } = req.params;
+      const { slug: oldSlug } = req.params;
+      const userId = req.user?._id || req.user?.id;
+      const isAdminUser = req.user?.role?.toLowerCase() === 'admin';
 
-      const allowed = ['title', 'excerpt', 'content', 'image', 'category', 'authorName', 'published', 'customUrl', 'keywords', 'childBlogs', 'seo'];
-      const updates = {};
-      allowed.forEach((k) => {
-        if (Object.prototype.hasOwnProperty.call(req.body, k))
-          updates[k] = req.body[k];
-      });
+      // Find original blog first for ownership check
+      const blog = await Blog.findOne({ slug: oldSlug });
+      if (!blog) return sendError(res, 404, 'Blog not found');
 
-      // Update publishedAt if published is set to true
-      if (updates.published === true) {
-        updates.publishedAt = new Date();
+      // Authorization Check: Admin or Owner
+      const isOwner = blog.user && blog.user.toString() === userId.toString();
+      if (!isAdminUser && !isOwner) {
+        return sendError(res, 403, 'Access denied. You can only edit your own blogs.');
       }
 
-      // Validate word count if content is being updated
+      // Extract fields from body
+      const { title, excerpt, content, category, author, customUrl, keywords, childBlogs, seoTitle, seoDescription, published } = req.body;
+      const updates = {};
+
+      if (title !== undefined) updates.title = title;
+      if (excerpt !== undefined) updates.excerpt = excerpt;
+      if (category !== undefined) updates.category = category;
+      if (author !== undefined) updates.authorName = author;
+      if (customUrl !== undefined) updates.customUrl = customUrl;
+      if (published !== undefined) {
+        updates.published = published === 'true' || published === true;
+        if (updates.published) updates.publishedAt = new Date();
+      }
+
+      // Parse complex fields if they come as strings (FormData)
+      if (content) {
+        try {
+          updates.content = typeof content === 'string' ? JSON.parse(content) : content;
+        } catch (e) {
+          return sendError(res, 400, 'Invalid content format');
+        }
+      }
+
+      if (keywords) {
+        try {
+          updates.keywords = typeof keywords === 'string' ? JSON.parse(keywords) : keywords;
+        } catch (e) {
+          updates.keywords = keywords.split(',').map(k => k.trim());
+        }
+      }
+
+      if (childBlogs) {
+        try {
+          updates.childBlogs = typeof childBlogs === 'string' ? JSON.parse(childBlogs) : childBlogs;
+        } catch (e) {
+          updates.childBlogs = [];
+        }
+      }
+
+      if (seoTitle || seoDescription) {
+        updates.seo = {
+          title: seoTitle || blog.seo?.title || updates.title || blog.title,
+          description: seoDescription || blog.seo?.description || updates.excerpt || blog.excerpt || '',
+        };
+      }
+
+      // Process uploaded files
+      const files = req.files || {};
+
+      // Main image update
+      if (files.image && files.image[0]) {
+        updates.image = files.image[0].path;
+      } else if (req.body.image && typeof req.body.image === 'string') {
+        updates.image = req.body.image; // Keep existing URL
+      } else if (req.body.imageUrl) {
+        updates.image = req.body.imageUrl;
+      }
+
+      // Section images update
+      if (updates.content && Array.isArray(updates.content)) {
+        updates.content = updates.content.map((section, index) => {
+          const sectionImageKey = `sectionImage_${index}`;
+          if (files[sectionImageKey] && files[sectionImageKey][0]) {
+            section.image = files[sectionImageKey][0].path;
+          }
+          return section;
+        });
+      }
+
+      // Validate word count
       if (updates.content) {
         let totalWords = 0;
         updates.content.forEach(section => {
@@ -260,31 +342,28 @@ const blogController = {
         }
       }
 
-      // Update slug if title changed
-      if (updates.title) {
-        updates.slug = updates.title
+      // Handle slug update if title changed
+      if (updates.title && updates.title !== blog.title) {
+        let newSlug = updates.title
           .toLowerCase()
           .replace(/[^a-z0-9\s-]/g, '')
           .replace(/\s+/g, '-')
           .replace(/-+/g, '-')
           .trim();
+
+        const existing = await Blog.findOne({ slug: newSlug, _id: { $ne: blog._id } });
+        if (existing) newSlug = `${newSlug}-${Date.now()}`;
+        updates.slug = newSlug;
       }
 
-      const updated = await Blog.findOneAndUpdate({ slug }, updates, {
+      const updated = await Blog.findOneAndUpdate({ slug: oldSlug }, updates, {
         new: true,
       }).lean();
-      if (!updated) return sendError(res, 404, 'Blog not found');
 
-      // regenerate sitemaps in background
       generateSitemaps().catch(err => console.error('sitemap generation failed after update:', err));
-
       return res.json({ success: true, data: updated });
     } catch (err) {
       console.error('updateBlog error', err);
-      if (err.name === 'ValidationError') {
-        const messages = Object.values(err.errors).map(val => val.message);
-        return sendError(res, 400, 'Validation Error', messages.join(', '));
-      }
       return sendError(res, 500, 'Internal server error', err.message);
     }
   }),
@@ -293,11 +372,19 @@ const blogController = {
   deleteBlog: expressAsyncHandler(async (req, res) => {
     try {
       const { slug } = req.params;
+      const userId = req.user?._id || req.user?.id;
+      const isAdminUser = req.user?.role?.toLowerCase() === 'admin';
+
+      const blog = await Blog.findOne({ slug });
+      if (!blog) return sendError(res, 404, 'Blog not found');
+
+      // Authorization Check
+      const isOwner = blog.user && blog.user.toString() === userId.toString();
+      if (!isAdminUser && !isOwner) {
+        return sendError(res, 403, 'Access denied. You can only delete your own blogs.');
+      }
 
       const removed = await Blog.findOneAndDelete({ slug }).lean();
-      if (!removed) return sendError(res, 404, 'Blog not found');
-
-      // regenerate sitemaps in background
       generateSitemaps().catch(err => console.error('sitemap generation failed after delete:', err));
 
       return res.json({ success: true, data: removed });

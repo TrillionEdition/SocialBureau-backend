@@ -10,7 +10,7 @@ const blogRoutes = express.Router();
 // ✅ CREATE BLOG - Protected with file uploads
 // ========================================
 // Create new blog (route: POST /blogs)
-blogRoutes.post('/', userAuthentication, isAdmin, upload.fields([
+blogRoutes.post('/', userAuthentication, upload.fields([
   { name: 'image', maxCount: 1 },
   { name: 'sectionImage_0', maxCount: 1 },
   { name: 'sectionImage_1', maxCount: 1 },
@@ -26,7 +26,6 @@ blogRoutes.post('/', userAuthentication, isAdmin, upload.fields([
 
 // ========================================
 // ✅ STATIC ROUTES - MUST come FIRST
-// These are specific paths that should not be confused with :slug
 // ========================================
 
 // Get stats
@@ -40,7 +39,6 @@ blogRoutes.get('/', blogController.getBlogs);
 
 // ========================================
 // ✅ NESTED ROUTES - MUST come BEFORE :slug
-// Specific paths with :slug param in path (like /:slug/comments)
 // ========================================
 
 // Like blog - Protected
@@ -57,16 +55,27 @@ blogRoutes.delete('/:slug/comments/:commentId', userAuthentication, blogControll
 
 // ========================================
 // ✅ DYNAMIC ROUTES - MUST come LAST
-// :slug will match any path, so must be after all specific routes
 // ========================================
 
 // Get single blog by slug
 blogRoutes.get('/:slug', blogController.getBlogBySlug);
 
 // Update blog
-blogRoutes.put('/:slug', userAuthentication, isAdmin, blogController.updateBlog);
+blogRoutes.put('/:slug', userAuthentication, upload.fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'sectionImage_0', maxCount: 1 },
+  { name: 'sectionImage_1', maxCount: 1 },
+  { name: 'sectionImage_2', maxCount: 1 },
+  { name: 'sectionImage_3', maxCount: 1 },
+  { name: 'sectionImage_4', maxCount: 1 },
+  { name: 'sectionImage_5', maxCount: 1 },
+  { name: 'sectionImage_6', maxCount: 1 },
+  { name: 'sectionImage_7', maxCount: 1 },
+  { name: 'sectionImage_8', maxCount: 1 },
+  { name: 'sectionImage_9', maxCount: 1 },
+]), blogController.updateBlog);
 
 // Delete blog
-blogRoutes.delete('/:slug', userAuthentication, isAdmin, blogController.deleteBlog);
+blogRoutes.delete('/:slug', userAuthentication, blogController.deleteBlog);
 
 module.exports = blogRoutes;

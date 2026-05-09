@@ -1,40 +1,80 @@
-const cloudinary = require('cloudinary').v2;
-const { CloudinaryStorage } = require('multer-storage-cloudinary');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
 const multer = require('multer');
+const path = require('path');
+const crypto = require('crypto');
 require('dotenv').config();
 
-if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.warn('Missing Cloudinary env vars. Make sure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET are set.');
+if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET || !process.env.R2_PUBLIC_URL) {
+  console.warn('Missing R2 env vars. Make sure R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET and R2_PUBLIC_URL are set.');
 }
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-const storage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: 'images',
-    // Depending on the version of multer-storage-cloudinary use either:
-    // allowed_formats: ['jpeg','png','jpg','webp'] OR allowedFormats: [...]
-    // You already validate mime type below with fileFilter, so this is optional.
-    allowed_formats: ['jpeg', 'png', 'jpg', 'webp'],
+const r2 = new S3Client({
+  region: 'auto',
+  endpoint: process.env.R2_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
   },
 });
 
-const upload = multer({
-  storage,
+const multerInstance = multer({
+  storage: multer.memoryStorage(),
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/jpg', 'image/webp'];
     if (!allowed.includes(file.mimetype)) {
-      // Pass error to multer so it can be handled by your error middleware
       return cb(new Error('Only JPEG/PNG/WEBP images are allowed'), false);
     }
     cb(null, true);
   },
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
+
+async function uploadToR2(file) {
+  const ext = path.extname(file.originalname) || '.jpg';
+  const uuid = crypto.randomUUID();
+
+  const publicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+  const bucket = process.env.R2_BUCKET || '';
+  const publicHasBucket = publicUrl.includes(`/${bucket}`) || publicUrl.endsWith(bucket);
+  const urlBase = publicHasBucket ? publicUrl : `${publicUrl}/${bucket}`;
+
+  const key = `images/${uuid}${ext}`;
+  await r2.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: file.buffer,
+    ContentType: file.mimetype,
+  }));
+  file.location = `${urlBase}/${key}`;
+}
+
+function wrapUpload(multerMiddleware) {
+  return async function (req, res, next) {
+    multerMiddleware(req, res, async (err) => {
+      if (err) return next(err);
+      try {
+        if (req.file) {
+          await uploadToR2(req.file);
+        }
+        if (req.files) {
+          const files = Array.isArray(req.files)
+            ? req.files
+            : Object.values(req.files).flat();
+          await Promise.all(files.map(uploadToR2));
+        }
+        next();
+      } catch (uploadErr) {
+        next(uploadErr);
+      }
+    });
+  };
+}
+
+const upload = {
+  single: (fieldName) => wrapUpload(multerInstance.single(fieldName)),
+  array: (fieldName, maxCount) => wrapUpload(multerInstance.array(fieldName, maxCount)),
+  fields: (fields) => wrapUpload(multerInstance.fields(fields)),
+  any: () => wrapUpload(multerInstance.any()),
+};
 
 module.exports = upload;

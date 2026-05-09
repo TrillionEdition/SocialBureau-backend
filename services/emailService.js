@@ -1,22 +1,15 @@
 // services/emailService.js
-const nodemailer = require('nodemailer');
+const { transporter } = require('../utils/sendMail');
 
-const transporter = nodemailer.createTransport({
-  service: process.env.MAIL_SERVICE || 'gmail',
-  auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS
-  }
-});
+// Verify connection configuration (Optional, already handled in utils/sendMail.js)
+// transporter.verify((error, success) => {
+//   if (error) {
+//     console.error('SMTP Connection Error:', error);
+//   } else {
+//     console.log('Strategy Lab Mail Server is ready to transmit dossiers.');
+//   }
+// });
 
-// Verify connection configuration
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('SMTP Connection Error:', error);
-  } else {
-    console.log('Strategy Lab Mail Server is ready to transmit dossiers.');
-  }
-});
 
 exports.sendConfirmation = async (client) => {
   await transporter.sendMail({
