@@ -29,7 +29,7 @@ const eventController = {
       } = req.body;
 
       // support file upload via multer/cloudinary (field name: 'image')
-      const uploadedImage = req.file ? (req.file.path || req.file.secure_url || req.file.url) : null;
+      const uploadedImage = req.file ? req.file.location : null;
 
       if (!title) return sendError(res, 400, 'Title is required');
       if (!description) return sendError(res, 400, 'Description is required');

@@ -15,7 +15,15 @@ userRouter.get('/logout', userController.logout)
 userRouter.get('/team', userController.getUsers)
 userRouter.put('/tools', userController.updateTool)
 userRouter.put('/clients', userController.updateClient)
-userRouter.get("/leaderboard", userController.getLeaderboard);
+userRouter.get('/leaderboard', userController.getLeaderboard);
+userRouter.get('/health-check', (req, res) => {
+    res.json({
+        status: "ok",
+        database: require("mongoose").connection.readyState === 1 ? "connected" : "disconnected",
+        mailer: process.env.MAIL_USER ? "configured" : "missing",
+        env: process.env.NODE_ENV || "development"
+    });
+});
 userRouter.post("/forgot-password", userController.forgotPassword);
 userRouter.post("/verify-otp", userController.verifyResetOTP);
 userRouter.post("/reset-password", userController.resetPassword);

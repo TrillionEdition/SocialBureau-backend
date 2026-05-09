@@ -40,7 +40,7 @@ const addAchievement = async (req, res) => {
         }
 
         // Use uploaded file path if available, otherwise use image URL from body
-        const imageUrl = req.file ? req.file.path : image;
+        const imageUrl = req.file ? req.file.location : image;
 
         // Create new achievement
         const achievement = new Achievement({
