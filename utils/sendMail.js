@@ -1,4 +1,8 @@
 const nodemailer = require("nodemailer");
+const dns = require("dns");
+
+// Force IPv4 DNS resolution globally — fixes Render's IPv6-default timeout with Gmail SMTP
+dns.setDefaultResultOrder("ipv4first");
 
 /**
  * PRODUCTION-READY MAILER
