@@ -1,6 +1,6 @@
 const express = require('express');
 const blogController = require('../controllers/blogController');
-const upload = require('../middlewares/cloudinary');
+const upload = require('../middlewares/cloudflare');
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
 

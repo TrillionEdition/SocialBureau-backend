@@ -1,7 +1,7 @@
 const express = require("express");
 const ajnoraRouters = express.Router();
 const ajnoraController = require("../controllers/ajnoraController");
-const upload = require("../middlewares/cloudinary");
+const upload = require("../middlewares/cloudflare");
 
 ajnoraRouters.post("/", upload.any(), ajnoraController.createEntry);
 ajnoraRouters.get("/", ajnoraController.getAllEntries);

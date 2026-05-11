@@ -1,6 +1,6 @@
 const express = require("express")
 const userController = require("../controllers/userController")
-const upload = require("../middlewares/cloudinary")
+const upload = require("../middlewares/cloudflare")
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
 const userRouter = express.Router()

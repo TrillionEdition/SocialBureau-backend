@@ -3,7 +3,7 @@ const partnershipRoutes = express.Router();
 const partnershipController = require("../controllers/partnershipController");
 const userAuthentication = require("../middlewares/userAuthentication");
 const adminAuthentication = require("../middlewares/adminAuthentication");
-const upload = require("../middlewares/cloudinary");
+const upload = require("../middlewares/cloudflare");
 
 partnershipRoutes.get("/student-stats", partnershipController.getStudentStats);
 partnershipRoutes.get("/dashboard-stats", partnershipController.getDashboardStats);

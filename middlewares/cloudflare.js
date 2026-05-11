@@ -8,9 +8,20 @@ if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2
   console.warn('Missing R2 env vars. Make sure R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET and R2_PUBLIC_URL are set.');
 }
 
+// Helper to ensure URL has protocol
+const ensureHttps = (url) => {
+  if (!url) return "";
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return `https://${url}`;
+};
+
+// Clean endpoint: handle protocol correctly
+const rawEndpoint = process.env.R2_ENDPOINT || "";
+const cleanEndpoint = ensureHttps(rawEndpoint.replace(/^https?:\/\//, "").split('/')[0]);
+
 const r2 = new S3Client({
-  region: 'auto',
-  endpoint: process.env.R2_ENDPOINT,
+  region: 'us-east-1',
+  endpoint: cleanEndpoint,
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
@@ -33,10 +44,12 @@ async function uploadToR2(file) {
   const ext = path.extname(file.originalname) || '.jpg';
   const uuid = crypto.randomUUID();
 
-  const publicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
+  const rawPublicUrl = process.env.R2_PUBLIC_URL || '';
+  const publicUrl = ensureHttps(rawPublicUrl).replace(/\/$/, '');
   const bucket = process.env.R2_BUCKET || '';
-  const publicHasBucket = publicUrl.includes(`/${bucket}`) || publicUrl.endsWith(bucket);
-  const urlBase = publicHasBucket ? publicUrl : `${publicUrl}/${bucket}`;
+  
+  // Logic to build the final URL correctly
+  const urlBase = publicUrl; 
 
   const key = `images/${uuid}${ext}`;
   await r2.send(new PutObjectCommand({
@@ -45,7 +58,13 @@ async function uploadToR2(file) {
     Body: file.buffer,
     ContentType: file.mimetype,
   }));
-  file.location = `${urlBase}/${key}`;
+  
+  const finalUrl = `${publicUrl}/${key}`;
+  console.log("☁️ R2 UPLOAD SUCCESS:");
+  console.log("   - Key:", key);
+  console.log("   - Final URL:", finalUrl);
+  
+  file.location = finalUrl;
 }
 
 function wrapUpload(multerMiddleware) {

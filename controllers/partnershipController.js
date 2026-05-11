@@ -92,9 +92,7 @@ const partnershipController = {
     }
 
     const { name, param, email, category, status, tags, image, subtitle, role, user, details, isFree, templateId } = req.body;
-    const logMsg = `[${new Date().toISOString()}] ADMIN_UPDATE: ID=${req.params.id}, Name=${name}, Details=${!!details}\n`;
-    fs.appendFileSync("save_debug.log", logMsg);
-    console.log(logMsg);
+    console.log(`💾 SAVE REQUEST: Image=${image}, Name=${name}, Param=${param}`);
 
     // Check if param is being changed and if it conflicts
     if (param && param !== partner.param) {
@@ -297,8 +295,14 @@ const partnershipController = {
     }
   }),
   
-  // Upload Image to Cloudinary
+  // Upload Image to Cloudflare R2
   uploadImage: asyncHandler(async (req, res) => {
+    if (req.file) {
+      console.log("--------------------------------------------------");
+      console.log("🚀 CLOUDFLARE UPLOAD SUCCESSFUL!");
+      console.log("🔗 URL:", req.file.location);
+      console.log("--------------------------------------------------");
+    }
     if (!req.file) {
       res.status(400);
       throw new Error("No image file provided");
