@@ -34,83 +34,31 @@ const TEAM_DATA = {
       name: "Keerthana",
       role: "Accountant",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1765443202/images/uytbxoupcmslyxf74fzd.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/uytbxoupcmslyxf74fzd.png",
       hoverImage:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1765443202/images/uytbxoupcmslyxf74fzd.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/uytbxoupcmslyxf74fzd.png",
       description:
         "Oversees budgeting, ledger management, and financial statements to support business decisions.",
     },
   ],
   strategyMarketing: [
     {
-      name: "Sherin Joseph",
-      role: "COO & HR",
-      image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1761195483/SB_ID_Card_Sherin_New_wtgfyo.png",
-      hoverImage: "/assets/sherin.webp",
-      description: "Drives talent acquisition & creative alignment ensuring brand consistency.",
-    },
-    {
       name: "Hajira",
       role: "Administration & CMO",
       description: "Ensures flawless daily operations and inter-department workflow excellence.",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1768816875/SB_ID_Card_Hajira_lrmfvk.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/SB_ID_Card_Hajira_lrmfvk.png",
       hoverImage: "/assets/hajira.webp",
-    },
-    {
-      name: "Mohammed Shereef",
-      role: "PMO",
-      image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1770974355/images/wodx1jeooonrc8yi0fib.jpg",
-      hoverImage:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1770974355/images/wodx1jeooonrc8yi0fib.jpg",
-      description: "Ensures every project connects vision to execution and strategy to outcomes.",
-    },
-    {
-      name: "Amal",
-      role: "Digital Marketer",
-      image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1766495417/images/nd8whdzhbwwsqzjhhfaj.jpg",
-      hoverImage: "/assets/aneek.webp",
-      description: "Leads paid media & performance strategies across global ad ecosystems.",
     },
     {
       name: "Rachel Susan oommen",
       role: "HR Asst",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1770037177/images/af8xbvarrsehbzcxjylq.jpg",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/af8xbvarrsehbzcxjylq.jpg",
       hoverImage:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1770037177/images/af8xbvarrsehbzcxjylq.jpg",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/af8xbvarrsehbzcxjylq.jpg",
       description:
         "Detail-oriented HR Assistant experienced in administrative support, onboarding, and employee coordination",
-    },
-  ],
-  contentProduction: [
-    {
-      name: "Gino Abraham",
-      role: "Cinematographer",
-      image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1773056139/ID_Card_gino-01_vmxq5p.jpg",
-      hoverImage:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1773056139/ID_Card_gino-01_vmxq5p.jpg",
-      description: "Responsible for visual direction on shoots using Sony A7M4 + DJI systems.",
-    },
-    {
-      name: "Taijo John",
-      role: "Graphic Designer",
-      image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1762493545/SB_ID_Card_Taijo_New_1_-1_eb0ygm.jpg",
-      hoverImage: "/assets/taijo.webp",
-      description: "Creates visual experiences that improve clarity, recall, and conversion.",
-    },
-    {
-      name: "Joseph",
-      role: "Video Editor",
-      image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1763380488/images/fnzkzrdkb3f8cli8583p.png",
-      hoverImage: "/assets/joseph.webp",
-      description: "Narrative-driven editor skilled in 4K workflows, color grading, and motion.",
     },
   ],
   technology: [
@@ -118,7 +66,7 @@ const TEAM_DATA = {
       name: "Elizebath Thomas",
       role: "Senior Web Developer",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1762493913/team5_zlamx7.webp",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/team5_zlamx7.webp",
       hoverImage: "/assets/elizebath.webp",
       description: "Builds React-based digital infrastructure & API integrations for automation.",
     },
@@ -126,9 +74,9 @@ const TEAM_DATA = {
       name: "Reshma Vijayan",
       role: "Web Developer",
       hoverImage:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1770036743/images/w4eogtldwfqtsoxl94tl.jpg",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/w4eogtldwfqtsoxl94tl.jpg",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1770036743/images/w4eogtldwfqtsoxl94tl.jpg",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/w4eogtldwfqtsoxl94tl.jpg",
       description:
         "Web Developer skilled in developing reliable, responsive, and visually appealing websites",
     },
@@ -136,42 +84,80 @@ const TEAM_DATA = {
       name: "Hasna",
       role: "Asst Web Developer",
       hoverImage:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1764580735/images/p6piwfsx26mqv3vd6eoz.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/p6piwfsx26mqv3vd6eoz.png",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1764580735/images/p6piwfsx26mqv3vd6eoz.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/p6piwfsx26mqv3vd6eoz.png",
       description: "Engineering modern ecosystems with intelligent API-driven automation.",
     },
   ],
   exemployee: [
     {
+      name: "Sherin Joseph",
+      role: "COO & HR",
+      image:
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/SB_ID_Card_Sherin_New_wtgfyo.png",
+    },
+    
+    {
+      name: "Mohammed Shereef",
+      role: "PMO",
+      image:
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/wodx1jeooonrc8yi0fib.jpg",
+    },
+    {
+      name: "Amal",
+      role: "Digital Marketer",
+      image:
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/nd8whdzhbwwsqzjhhfaj.jpg",
+    },
+    
+    {
+      name: "Gino Abraham",
+      role: "Cinematographer",
+      image:
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/ID_Card_gino-01_vmxq5p.jpg",
+    },
+    {
+      name: "Taijo John",
+      role: "Graphic Designer",
+      image:
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/SB_ID_Card_Taijo_New_1_-1_eb0ygm.jpg",
+    },
+    {
+      name: "Joseph",
+      role: "Video Editor",
+      image:
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/fnzkzrdkb3f8cli8583p.png",
+    },
+    {
       name: "Aneek",
       role: "Performance Marketing Team Head",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1761281558/images/bsa5x1ay2qrdoryvxaty.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/bsa5x1ay2qrdoryvxaty.png",
     },
     {
       name: "Anjay Ramesh",
       role: "Content Writer & Production Lead",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1761195484/SB_ID_Card_Anjay_New_bbobhw.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/SB_ID_Card_Anjay_New_bbobhw.png",
     },
     {
       name: "Afnas N",
       role: "Cinematographer",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1761030913/images/kuktmap7exgze81z2afh.png",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/kuktmap7exgze81z2afh.png",
     },
     {
       name: "Gowri Pradeep",
       role: "Creative Director",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1773056139/ID_Card_all_Team-15_1_tajdxo.jpg",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/ID_Card_all_Team-15_1_tajdxo.jpg",
     },
     {
       name: "Muhasin",
       role: "SEO Specialist and Performance Marketer",
       image:
-        "https://res.cloudinary.com/dtwcgfmar/image/upload/v1766494424/images/iy29fzregdmfohgjc3pr.jpg",
+        "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/iy29fzregdmfohgjc3pr.jpg",
     },
   ],
 };
