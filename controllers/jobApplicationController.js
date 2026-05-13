@@ -38,26 +38,19 @@ const jobApplicationController = {
             if (!job) return res.status(404).json({ message: "Job not found" });
 
             let resumeUrl = "";
-
             if (resumeFile) {
-                // 1. Upload Resume to R2
-                const uuid = crypto.randomUUID();
-                const fileName = `resumes/${uuid}-${resumeFile.originalname}`;
-                
-                await r2.send(new PutObjectCommand({
-                    Bucket: process.env.R2_BUCKET,
-                    Key: fileName,
-                    Body: resumeFile.buffer,
-                    ContentType: resumeFile.mimetype,
-                }));
+                // Use local file path as requested
+                const host = req.get('host');
+                const protocol = req.protocol;
+                // Normalize path for URL (replace backslashes with forward slashes)
+                const relativePath = resumeFile.path.replace(/\\/g, '/');
+                resumeUrl = `${protocol}://${host}/${relativePath}`;
 
-                const publicUrl = (process.env.R2_PUBLIC_URL || '').replace(/\/$/, '');
-                const bucket = process.env.R2_BUCKET || '';
-                resumeUrl = `https://${publicUrl}/${bucket}/${fileName}`;
-
-                // 2. Optional: Run ATS analysis if text extraction is available
+                // Optional: Run ATS analysis (local version)
                 try {
-                    const resumeText = await atsEngine.extractTextFromFile(resumeFile.buffer, resumeFile.mimetype);
+                    const fs = require('fs');
+                    const fileBuffer = fs.readFileSync(resumeFile.path);
+                    const resumeText = await atsEngine.extractTextFromFile(fileBuffer, resumeFile.mimetype);
                     const fullJd = `${job.title || ""} ${job.description || ""} ${job.about || ""}`;
                     req.atsResult = atsEngine.calculateScore(resumeText, fullJd);
                 } catch (e) {
@@ -198,7 +191,6 @@ const jobApplicationController = {
         } catch (error) {
             res.status(500).json({ message: error.message });
         }
-    }
     },
 
     // ADD MESSAGE TO APPLICATION
@@ -252,6 +244,32 @@ const jobApplicationController = {
                 $or: [{ userId }, { candidateEmail: req.query.email }] 
             }).populate('jobId');
             res.json(apps);
+        } catch (error) {
+            res.status(500).json({ message: error.message });
+        }
+    },
+    // DELETE APPLICATION
+    deleteApplication: async (req, res) => {
+        const { id } = req.params;
+        try {
+            const application = await JobApplication.findByIdAndDelete(id);
+            if (!application) {
+                return res.status(404).json({ message: "Application not found" });
+            }
+
+            // Optional: Delete local resume file if exists
+            if (application.resumeUrl && application.resumeUrl.includes(req.get('host'))) {
+                const fs = require('fs');
+                const path = require('path');
+                // Extract relative path from URL: http://host/assets/job/file.pdf -> assets/job/file.pdf
+                const urlPath = new URL(application.resumeUrl).pathname;
+                const filePath = path.join(__dirname, '..', urlPath);
+                if (fs.existsSync(filePath)) {
+                    fs.unlinkSync(filePath);
+                }
+            }
+
+            res.json({ message: "Application deleted successfully" });
         } catch (error) {
             res.status(500).json({ message: error.message });
         }

@@ -1,4 +1,5 @@
 const CompanyAchievement = require("../models/companyAchievementModel");
+const { getCache, setCache, invalidateCompanyAchievementCaches, CACHE_EXPIRY } = require("../utils/Cacheutils");
 
 // Add a company achievement
 exports.addCompanyAchievement = async (req, res) => {
@@ -22,6 +23,9 @@ exports.addCompanyAchievement = async (req, res) => {
 
         await achievement.save();
 
+        // Invalidate cache
+        await invalidateCompanyAchievementCaches();
+
         res.status(201).json({
             success: true,
             message: "Company achievement added successfully",
@@ -38,7 +42,18 @@ exports.addCompanyAchievement = async (req, res) => {
 // Get all company achievements
 exports.getAllCompanyAchievements = async (req, res) => {
     try {
+        const cacheKey = "company:achievements:all";
+        const cachedData = await getCache(cacheKey);
+        if (cachedData) {
+            return res.status(200).json({
+                success: true,
+                data: cachedData,
+            });
+        }
+
         const achievements = await CompanyAchievement.find().sort({ createdAt: -1 });
+
+        await setCache(cacheKey, achievements, CACHE_EXPIRY.BLOGS_LIST);
 
         res.status(200).json({
             success: true,
@@ -68,6 +83,9 @@ exports.updateCompanyAchievement = async (req, res) => {
             });
         }
 
+        // Invalidate cache
+        await invalidateCompanyAchievementCaches();
+
         res.status(200).json({
             success: true,
             message: "Achievement updated successfully",
@@ -93,6 +111,9 @@ exports.deleteCompanyAchievement = async (req, res) => {
                 message: "Achievement not found",
             });
         }
+
+        // Invalidate cache
+        await invalidateCompanyAchievementCaches();
 
         res.status(200).json({
             success: true,

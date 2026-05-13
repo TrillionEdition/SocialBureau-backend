@@ -13,7 +13,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1044.0",
+    "@aws-sdk/client-s3": "^3.1045.0",
     "@google-analytics/admin": "^9.0.1",
     "@google-analytics/data": "^5.2.1",
     "@google/generative-ai": "^0.24.1",
@@ -39,7 +39,7 @@
     "multer-storage-cloudinary": "^4.0.0",
     "natural": "^8.1.0",
     "node-cron": "^4.2.1",
-    "nodemailer": "^7.0.12",
+    "nodemailer": "^6.9.13",
     "nodemon": "^3.1.10",
     "pdf-parse": "^1.1.1",
     "razorpay": "^2.9.6",

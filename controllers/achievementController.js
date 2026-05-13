@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Achievement = require("../models/achievementModel");
 const User = require("../models/userModel");
+const { getCache, setCache, invalidateCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
 
 // Add a new achievement
 const addAchievement = async (req, res) => {
@@ -59,6 +60,9 @@ const addAchievement = async (req, res) => {
             { new: true }
         ).populate('achievements');
 
+        // Invalidate cache
+        await invalidateCache([`user:achievements:${user._id}`, `user:details:${user.name.trim().toLowerCase()}`]);
+
         res.status(201).json({
             success: true,
             message: "Achievement added successfully",
@@ -83,9 +87,20 @@ const addAchievement = async (req, res) => {
 const getUserAchievements = async (req, res) => {
     try {
         const { userId } = req.params;
+        const cacheKey = `user:achievements:${userId}`;
+
+        const cachedData = await getCache(cacheKey);
+        if (cachedData) {
+            return res.status(200).json({
+                success: true,
+                data: cachedData
+            });
+        }
 
         const achievements = await Achievement.find({ user: userId })
             .sort({ createdAt: -1 });
+
+        await setCache(cacheKey, achievements, CACHE_EXPIRY.USER_DATA);
 
         res.status(200).json({
             success: true,
@@ -122,6 +137,12 @@ const updateAchievement = async (req, res) => {
             });
         }
 
+        // Invalidate cache
+        const user = await User.findById(achievement.user);
+        if (user) {
+            await invalidateCache([`user:achievements:${user._id}`, `user:details:${user.name.trim().toLowerCase()}`]);
+        }
+
         res.status(200).json({
             success: true,
             message: "Achievement updated successfully",
@@ -156,6 +177,12 @@ const deleteAchievement = async (req, res) => {
             { new: true }
         );
 
+        // Invalidate cache
+        const user = await User.findById(achievement.user);
+        if (user) {
+            await invalidateCache([`user:achievements:${achievement.user}`, `user:details:${user.name.trim().toLowerCase()}`]);
+        }
+
         res.status(200).json({
             success: true,
             message: "Achievement deleted successfully"
@@ -172,6 +199,12 @@ const deleteAchievement = async (req, res) => {
 const getUserDetails = async (req, res) => {
     try {
         const { name } = req.params;
+        const cacheKey = `user:details:${name.trim().toLowerCase()}`;
+
+        const cachedData = await getCache(cacheKey);
+        if (cachedData) {
+            return res.status(200).json(cachedData);
+        }
 
         const user = await User.findOne({
             name: { $regex: new RegExp(`^${name.trim()}$`, "i") }
@@ -216,11 +249,15 @@ const getUserDetails = async (req, res) => {
             totalHours: user.totalHours || 0
         };
 
-        res.status(200).json({
+        const responseData = {
             success: true,
             user,
             clickup: clickupData
-        });
+        };
+
+        await setCache(cacheKey, responseData, CACHE_EXPIRY.USER_DATA);
+
+        res.status(200).json(responseData);
     } catch (error) {
         res.status(400).json({
             success: false,

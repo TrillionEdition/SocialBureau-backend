@@ -6,6 +6,7 @@ const {
   addComment,
   removeComment,
 } = require('../services/engagementService');
+const { getCache, setCache, invalidateCache, invalidateBlogCaches, CACHE_EXPIRY } = require("../utils/Cacheutils");
 
 function sendError(res, status = 400, message = 'Bad Request', details = null) {
   const payload = { success: false, message };
@@ -136,6 +137,10 @@ const blogController = {
       });
 
       const saved = await newBlog.save();
+      
+      // Invalidate cache
+      await invalidateBlogCaches();
+      
       // regenerate sitemaps in background
       generateSitemaps().catch(err => console.error('sitemap generation failed after create:', err));
       return res.status(201).json({ success: true, data: saved });
@@ -173,12 +178,25 @@ const blogController = {
       }
 
       console.log('🔍 Querying blogs with:', query);
+      
+      // Redis caching
+      const cacheKey = `blogs:list:${JSON.stringify(query)}:${limit}`;
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        console.log('⚡ Redis Cache Hit: getBlogs');
+        return res.json({ success: true, data: cachedData });
+      }
+
       const blogs = await Blog.find(query)
         .sort('-createdAt')
         .limit(parseInt(limit))
         .lean();
 
       console.log(`✅ Found ${blogs.length} blogs`);
+      
+      // Cache the result
+      await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
+      
       return res.json({ success: true, data: blogs });
     } catch (err) {
       console.error('❌ getBlogs error:', err);
@@ -206,6 +224,15 @@ const blogController = {
       }
 
       console.log('🔍 Querying blog with slug:', slug);
+      
+      // Redis caching
+      const cacheKey = `blog:${slug}`;
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        console.log('⚡ Redis Cache Hit: getBlogBySlug');
+        return res.json({ success: true, data: cachedData });
+      }
+
       const blog = await Blog.findOne({ slug })
         .populate('childBlogs', 'title slug excerpt image category')
         .lean();
@@ -216,6 +243,10 @@ const blogController = {
       }
 
       console.log('✅ Blog found:', blog.title);
+      
+      // Cache the result
+      await setCache(cacheKey, blog, CACHE_EXPIRY.SINGLE_BLOG);
+      
       return res.json({ success: true, data: blog });
     } catch (err) {
       console.error('❌ getBlogBySlug error:', err);
@@ -230,10 +261,19 @@ const blogController = {
       const { limit = 3 } = req.query;
       const l = Math.min(10, Math.max(1, parseInt(limit, 10) || 3));
 
+      const cacheKey = `blogs:latest:${l}`;
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+
       const blogs = await Blog.find({ published: true })
         .sort('-createdAt')
         .limit(l)
         .lean();
+        
+      await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
+      
       return res.json({ success: true, data: blogs });
     } catch (err) {
       console.error('getLatestBlogs error', err);
@@ -360,6 +400,13 @@ const blogController = {
         new: true,
       }).lean();
 
+      // Invalidate cache
+      await invalidateBlogCaches();
+      await invalidateCache(`blog:${oldSlug}`);
+      if (updated.slug !== oldSlug) {
+        await invalidateCache(`blog:${updated.slug}`);
+      }
+
       generateSitemaps().catch(err => console.error('sitemap generation failed after update:', err));
       return res.json({ success: true, data: updated });
     } catch (err) {
@@ -385,6 +432,11 @@ const blogController = {
       }
 
       const removed = await Blog.findOneAndDelete({ slug }).lean();
+      
+      // Invalidate cache
+      await invalidateBlogCaches();
+      await invalidateCache(`blog:${slug}`);
+      
       generateSitemaps().catch(err => console.error('sitemap generation failed after delete:', err));
 
       return res.json({ success: true, data: removed });
@@ -397,6 +449,12 @@ const blogController = {
   // Get blog stats
   getStats: expressAsyncHandler(async (req, res) => {
     try {
+      const cacheKey = "blogs:stats";
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+
       const [totalBlogs, publishedBlogs, totalViews] = await Promise.all([
         Blog.countDocuments(),
         Blog.countDocuments({ published: true }),
@@ -411,6 +469,8 @@ const blogController = {
         draft: totalBlogs - publishedBlogs,
         views: totalViews[0]?.total || 0,
       };
+
+      await setCache(cacheKey, stats, CACHE_EXPIRY.BLOGS_LIST);
 
       return res.json({ success: true, data: stats });
     } catch (err) {

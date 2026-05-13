@@ -1,50 +1,45 @@
 const nodemailer = require("nodemailer");
+const dns = require("dns");
+
+// Force IPv4 DNS resolution globally — fixes Render's IPv6-default timeout with Gmail SMTP
+dns.setDefaultResultOrder("ipv4first");
 
 /**
- * GMAIL CLOUD-OPTIMIZED MAILER (IPv4 Force)
- * This version forces IPv4 to bypass common ISP and Cloud IPv6 timeout issues.
+ * PRODUCTION-READY MAILER
+ * Supports Gmail (Local) and SendGrid (Production/Render)
+ * Port 2525 is used for SendGrid to bypass Render's firewall blocks.
  */
-
-const mailUser = process.env.MAIL_USER;
-const mailPass = process.env.MAIL_PASS;
-
-const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true, // SSL
-  auth: {
-    user: mailUser,
-    pass: mailPass,
-  },
-  // 🛡️ Force IPv4 and add robust timeouts
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 30000,
-  dnsTimeout: 10000,
-  // 🔥 The "Magic" setting for many cloud providers: Force IPv4
-  socket: {
-    family: 4
-  },
-  tls: {
-    rejectUnauthorized: false,
-    minVersion: "TLSv1.2"
-  }
-});
-
 const sendMail = async ({ to, subject, html }) => {
-  console.log(`\n📤 [MAILER] Attempting dispatch to: ${to}`);
+  console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
-  if (!mailUser || !mailPass) {
-    console.warn("⚠️  SKIPPING EMAIL SEND: MAIL_USER or MAIL_PASS missing in .env");
-    if (process.env.NODE_ENV !== "production") {
-      console.log("🛠️  [DEV FALLBACK] Email would have been sent to:", to);
-      return { messageId: "dev-mock-" + Date.now(), response: "250 OK (Mocked)" };
-    }
-    throw new Error("Missing email credentials");
+  let transporter;
+
+  // 🛡️ MODE 1: SendGrid (Recommended for Render)
+  if (process.env.SENDGRID_API_KEY) {
+    console.log("🚀 [MAILER] Using SendGrid on Port 2525 (Render Optimized)");
+    transporter = nodemailer.createTransport({
+      host: "smtp.sendgrid.net",
+      port: 2525, // Bypasses Render's firewall blocks
+      auth: {
+        user: "apikey", // This is literally the string "apikey"
+        pass: process.env.SENDGRID_API_KEY,
+      },
+    });
+  } 
+  // 🛡️ MODE 2: Gmail (Fallback/Local)
+  else {
+    console.log("⏱️  [MAILER] No SendGrid key found. Falling back to Gmail...");
+    transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.MAIL_USER,
+        pass: process.env.MAIL_PASS,
+      },
+    });
   }
 
   const mailOptions = {
-    from: `"SocialBureau" <${mailUser}>`,
+    from: `"SocialBureau" <${process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER}>`,
     to,
     subject,
     html,
@@ -55,31 +50,15 @@ const sendMail = async ({ to, subject, html }) => {
     console.log("✅ [MAILER] Success! Message ID:", info.messageId);
     return info;
   } catch (err) {
-    console.error("❌ [MAILER] Dispatch Failed.");
-    console.error(`Error Type: ${err.name}`);
-    console.error(`Error Message: ${err.message}`);
+    console.error("❌ [MAILER] Email Dispatch Failed.");
+    console.error(`Error: ${err.message}`);
 
     if (process.env.NODE_ENV !== "production") {
       console.log("🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
-
-    throw new Error(`Email delivery failed: ${err.message}`);
+    throw new Error(`Email delivery failed: ${err.message}. If using Render, please provide a SENDGRID_API_KEY and ensure it's not a firewall block.`);
   }
 };
 
-// Verify transporter on startup ONLY if credentials exist
-if (mailUser && mailPass) {
-  transporter
-    .verify()
-    .then(() => {
-      console.log("✅ [MAILER] Verified and Ready (IPv4 Forced)");
-    })
-    .catch((err) => {
-      console.warn("⚠️  [MAILER] Verification Failed. This may be due to temporary network issues.");
-      console.warn(`Reason: ${err.message}`);
-    });
-}
-
 module.exports = sendMail;
-module.exports.transporter = transporter;

@@ -181,7 +181,6 @@ exports.updateJob = async (req, res) => {
 
     // Invalidate ALL related caches immediately
     await invalidateJobCaches();
-    if (job) await invalidateCache(`job:${job.slug}`);
     await invalidateCache("jobs:staff:all");
     await invalidateCache("jobs:all");
 

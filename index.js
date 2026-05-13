@@ -71,6 +71,7 @@ app.use(
 
 // Static files for uploads
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/assets", express.static(path.join(__dirname, "assets")));
 
 // ================== ROUTES ==================
 app.use("/", router);
