@@ -1,6 +1,6 @@
 const express = require("express")
 const userController = require("../controllers/userController")
-const upload = require("../middlewares/cloudinary")
+const upload = require("../middlewares/cloudflare")
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
 const userRouter = express.Router()
@@ -9,7 +9,7 @@ userRouter.post('/register', upload.fields([
     { name: 'coverImage', maxCount: 1 },
     { name: 'idCard', maxCount: 1 },
     { name: 'toolIcons', maxCount: 20 }
-]), userController.register)
+], 'socialbureau-media/images/users'), userController.register)
 userRouter.post("/login", userController.login)
 userRouter.get('/logout', userController.logout)
 userRouter.get('/team', userController.getUsers)
@@ -36,7 +36,7 @@ userRouter.put('/:id', upload.fields([
     { name: 'idCard', maxCount: 1 },
     { name: 'avatar', maxCount: 1 }, // Added avatar support
     { name: 'toolIcons', maxCount: 20 }
-]), userController.updateUser);
+], 'socialbureau-media/images/users'), userController.updateUser);
 
 module.exports = userRouter
 

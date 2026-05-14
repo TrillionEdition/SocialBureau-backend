@@ -7,6 +7,7 @@ const {
   removeComment,
 } = require('../services/engagementService');
 const { getCache, setCache, invalidateCache, invalidateBlogCaches, CACHE_EXPIRY } = require("../utils/Cacheutils");
+const { deleteFromR2 } = require('../middlewares/cloudflare');
 
 function sendError(res, status = 400, message = 'Bad Request', details = null) {
   const payload = { success: false, message };
@@ -137,10 +138,10 @@ const blogController = {
       });
 
       const saved = await newBlog.save();
-      
+
       // Invalidate cache
       await invalidateBlogCaches();
-      
+
       // regenerate sitemaps in background
       generateSitemaps().catch(err => console.error('sitemap generation failed after create:', err));
       return res.status(201).json({ success: true, data: saved });
@@ -178,7 +179,7 @@ const blogController = {
       }
 
       console.log('🔍 Querying blogs with:', query);
-      
+
       // Redis caching
       const cacheKey = `blogs:list:${JSON.stringify(query)}:${limit}`;
       const cachedData = await getCache(cacheKey);
@@ -193,10 +194,10 @@ const blogController = {
         .lean();
 
       console.log(`✅ Found ${blogs.length} blogs`);
-      
+
       // Cache the result
       await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
-      
+
       return res.json({ success: true, data: blogs });
     } catch (err) {
       console.error('❌ getBlogs error:', err);
@@ -224,7 +225,7 @@ const blogController = {
       }
 
       console.log('🔍 Querying blog with slug:', slug);
-      
+
       // Redis caching
       const cacheKey = `blog:${slug}`;
       const cachedData = await getCache(cacheKey);
@@ -243,10 +244,10 @@ const blogController = {
       }
 
       console.log('✅ Blog found:', blog.title);
-      
+
       // Cache the result
       await setCache(cacheKey, blog, CACHE_EXPIRY.SINGLE_BLOG);
-      
+
       return res.json({ success: true, data: blog });
     } catch (err) {
       console.error('❌ getBlogBySlug error:', err);
@@ -271,9 +272,9 @@ const blogController = {
         .sort('-createdAt')
         .limit(l)
         .lean();
-        
+
       await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
-      
+
       return res.json({ success: true, data: blogs });
     } catch (err) {
       console.error('getLatestBlogs error', err);
@@ -349,7 +350,11 @@ const blogController = {
 
       // Main image update
       if (files.image && files.image[0]) {
-        updates.image = files.image[0].path;
+        // Delete old image if it exists and is different
+        if (blog.image) {
+          await deleteFromR2(blog.image);
+        }
+        updates.image = files.image[0].location;
       } else if (req.body.image && typeof req.body.image === 'string') {
         updates.image = req.body.image; // Keep existing URL
       } else if (req.body.imageUrl) {
@@ -358,13 +363,18 @@ const blogController = {
 
       // Section images update
       if (updates.content && Array.isArray(updates.content)) {
-        updates.content = updates.content.map((section, index) => {
+        updates.content = await Promise.all(updates.content.map(async (section, index) => {
           const sectionImageKey = `sectionImage_${index}`;
           if (files[sectionImageKey] && files[sectionImageKey][0]) {
-            section.image = files[sectionImageKey][0].path;
+            // Delete old section image if it exists
+            const oldSection = blog.content[index];
+            if (oldSection && oldSection.image) {
+              await deleteFromR2(oldSection.image);
+            }
+            section.image = files[sectionImageKey][0].location;
           }
           return section;
-        });
+        }));
       }
 
       // Validate word count
@@ -431,12 +441,25 @@ const blogController = {
         return sendError(res, 403, 'Access denied. You can only delete your own blogs.');
       }
 
-      const removed = await Blog.findOneAndDelete({ slug }).lean();
+      // Delete images from R2 before removing the blog record
+      if (blog.image) {
+        await deleteFromR2(blog.image);
+      }
       
+      if (blog.content && Array.isArray(blog.content)) {
+        for (const section of blog.content) {
+          if (section.image) {
+            await deleteFromR2(section.image);
+          }
+        }
+      }
+
+      const removed = await Blog.findOneAndDelete({ slug }).lean();
+
       // Invalidate cache
       await invalidateBlogCaches();
       await invalidateCache(`blog:${slug}`);
-      
+
       generateSitemaps().catch(err => console.error('sitemap generation failed after delete:', err));
 
       return res.json({ success: true, data: removed });

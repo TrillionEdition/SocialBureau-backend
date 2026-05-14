@@ -18,10 +18,9 @@ async function connectDB() {
     }
 
     const opts = {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      // Avoid Mongoose buffering commands while the connection is being established
-      bufferCommands: false,
+      // Enable Mongoose buffering commands while the connection is being established
+      // This prevents "MongooseError: Cannot call find() before initial connection is complete"
+      bufferCommands: true,
       // Fail fast if cannot select a server
       serverSelectionTimeoutMS: 10000,
       // Limit pool size for serverless environments
@@ -29,6 +28,7 @@ async function connectDB() {
     };
 
     globalAny._mongo.promise = mongoose.connect(process.env.MONGO_URI, opts).then((mongooseInstance) => {
+      console.log("✅ New MongoDB connection established");
       return mongooseInstance;
     });
   }
@@ -36,11 +36,10 @@ async function connectDB() {
   try {
     const conn = await globalAny._mongo.promise;
     globalAny._mongo.conn = conn;
-    console.log("MongoDB connected (cached)");
     return conn;
   } catch (err) {
     globalAny._mongo.promise = null;
-    console.error("MongoDB connection error:", err);
+    console.error("❌ MongoDB connection error:", err);
     throw err;
   }
 }

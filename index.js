@@ -1,5 +1,4 @@
 require("dotenv").config();
-// Final restart to ensure all routes including image-proxy are active
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./database/connectDB");
@@ -11,16 +10,6 @@ const helmet = require("helmet");
 const path = require("path");
 
 const app = express();
-
-// ================== DATABASE ==================
-connectDB()
-  .then(() => {
-    // Start cron jobs after DB is connected
-    require("./cron/newsletterCron");
-  })
-  .catch((err) => {
-    console.error("Failed to start cron jobs:", err);
-  });
 
 // ================== ALLOWED ORIGINS ==================
 const allowedOrigins = [
@@ -82,10 +71,29 @@ app.use(errorHandler);
 // ================== START SERVER ==================
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`\n${"=".repeat(50)}`);
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`${"=".repeat(50)}\n`);
-});
+const startServer = async () => {
+  try {
+    // Wait for database connection before starting server
+    await connectDB();
+    
+    // Start cron jobs after DB is connected
+    require("./cron/newsletterCron");
+
+    app.listen(PORT, () => {
+      console.log(`\n${"=".repeat(50)}`);
+      console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+      console.log(`${"=".repeat(50)}\n`);
+    });
+  } catch (err) {
+    console.error("❌ Critical Failure: Could not start server due to DB connection error.");
+    console.error(err);
+    // In production, we might want to keep the process alive for health checks, 
+    // but here we fail fast so it can be restarted.
+    process.exit(1);
+  }
+};
+
+startServer();
 
 module.exports = app;

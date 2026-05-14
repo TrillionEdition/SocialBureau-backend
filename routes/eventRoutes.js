@@ -1,6 +1,6 @@
 const express = require('express');
 const eventController = require('../controllers/eventController');
-const upload = require('../middlewares/cloudinary');
+const upload = require('../middlewares/cloudflare');
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
 
@@ -8,7 +8,7 @@ const eventRoutes = express.Router();
 
 // Create new event
 // Create new event (supports file upload: field name 'image')
-eventRoutes.post('/add', userAuthentication, isAdmin, upload.single('image'), eventController.createEvent);
+eventRoutes.post('/add', userAuthentication, isAdmin, upload.single('image', 'socialbureau-media/images/events'), eventController.createEvent);
 
 // Get all events (with filters)
 eventRoutes.get('/list', eventController.getEvents);

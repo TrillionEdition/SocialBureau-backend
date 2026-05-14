@@ -29,10 +29,10 @@ const {
 const userAuthentication = require("../middlewares/userAuthentication");
 const optionalAuthentication = require("../middlewares/optionalAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
-const upload = require("../middlewares/cloudinary");
+const upload = require("../middlewares/cloudflare");
 
 // CREATE JOB (admin/hr only)
-jobRoutes.post("/", userAuthentication, isAdmin, upload.single("image"), createJob);
+jobRoutes.post("/", userAuthentication, isAdmin, upload.single("image", "socialbureau-media/images/jobs"), createJob);
 
 // GET ALL JOBS (with optional auth for admin visibility)
 jobRoutes.get("/", optionalAuthentication, getJobs);
@@ -41,7 +41,7 @@ jobRoutes.get("/", optionalAuthentication, getJobs);
 jobRoutes.get("/:slug", getJobBySlug);
 
 // UPDATE JOB (admin/hr only)
-jobRoutes.put("/:id", userAuthentication, isAdmin, upload.single("image"), updateJob);
+jobRoutes.put("/:id", userAuthentication, isAdmin, upload.single("image", "socialbureau-media/images/jobs"), updateJob);
 
 // DELETE JOB (admin only) - Optional
 jobRoutes.delete("/:id", userAuthentication, isAdmin, deleteJob);
