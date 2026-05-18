@@ -136,7 +136,10 @@ const userSchema = new mongoose.Schema(
         ref: "JobPosting",
       },
     ],
-
+    hasPaidInfluencer: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

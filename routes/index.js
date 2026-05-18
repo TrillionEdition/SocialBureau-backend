@@ -9,7 +9,7 @@ const newsletterRoutes = require("./newsletterRoutes");
 const achievementRoutes = require("./achievementRoutes");
 const companyAchievementRoutes = require("./companyAchievementRoutes");
 const clientRoutes = require("./clientRoutes");
-// const paymentRoutes = require("./paymentRoutes");
+const paymentRoutes = require("./paymentRoutes");
 const jobRoutes = require("./jobRoutes");
 const clientReviewRoutes = require('./clientReviewRoutes');
 const analyticsRoutes = require("./analyticsRoutes");
@@ -29,6 +29,10 @@ const router = express.Router();
 
 router.use(express.json());
 
+// Move Team to Top for Priority
+router.use('/team-v2', teamRoutes);
+router.use('/team', teamRoutes);
+
 router.use("/clickup", clickupRoutes);
 router.use("/user", userRouter);
 router.use("/review", reviewRoutes);
@@ -46,10 +50,9 @@ router.use("/company-achievement", companyAchievementRoutes);
 router.use('/client-reviews', clientReviewRoutes);
 router.use("/api/analytics", analyticsRoutes);
 router.use("/partners", partnershipRoutes);
-// router.use("/payment", paymentRoutes);
+router.use("/payment", paymentRoutes);
 router.use('/ats', atsRoutes);
 router.use('/resume', resumeRoutes);
-router.use('/team', teamRoutes);
 router.use("/api-leads", apiLeadRoutes);
 router.use("/media-waitlist", mediaWaitlistRoutes);
 router.use("/ajnora", ajnoraRouters);

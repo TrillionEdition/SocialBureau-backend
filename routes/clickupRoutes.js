@@ -10,6 +10,7 @@ clickupRoutes.get('/tasks/:taskId', clickupController.getTaskById);
 clickupRoutes.get('/time', clickupController.getTime);
 clickupRoutes.get('/user-task', clickupController.getTasksById);
 clickupRoutes.get('/user-details', clickupController.getUserDetails);
+clickupRoutes.get('/member-details', clickupController.getMemberDetails);
 clickupRoutes.get('/test', clickupController.testClickUp);
 clickupRoutes.get('/tasks/:taskId/activity', clickupController.getTaskActivity);
 clickupRoutes.post('/create-task', clickupController.createTask);

@@ -40,7 +40,7 @@ const multerInstance = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
 });
 
-async function uploadToR2(file) {
+async function uploadToR2(file, req) {
   const ext = path.extname(file.originalname) || '.jpg';
   const uuid = crypto.randomUUID();
 
@@ -48,10 +48,10 @@ async function uploadToR2(file) {
   const publicUrl = ensureHttps(rawPublicUrl).replace(/\/$/, '');
   const bucket = process.env.R2_BUCKET || '';
   
-  // Logic to build the final URL correctly
-  const urlBase = publicUrl; 
+  // Custom folder support
+  const folder = req?.uploadFolder ? req.uploadFolder.replace(/\/$/, '') : 'images';
+  const key = `${folder}/${uuid}${ext}`;
 
-  const key = `images/${uuid}${ext}`;
   await r2.send(new PutObjectCommand({
     Bucket: bucket,
     Key: key,
@@ -73,13 +73,13 @@ function wrapUpload(multerMiddleware) {
       if (err) return next(err);
       try {
         if (req.file) {
-          await uploadToR2(req.file);
+          await uploadToR2(req.file, req);
         }
         if (req.files) {
           const files = Array.isArray(req.files)
             ? req.files
             : Object.values(req.files).flat();
-          await Promise.all(files.map(uploadToR2));
+          await Promise.all(files.map(f => uploadToR2(f, req)));
         }
         next();
       } catch (uploadErr) {
