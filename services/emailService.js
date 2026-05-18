@@ -34,7 +34,7 @@ exports.sendAjnoraConfirmation = async (data) => {
     html: `
       <div style="font-family: 'DM Sans', sans-serif; max-width: 600px; margin: 0 auto; background-color: #0a0a0a; color: #ffffff; padding: 40px; border-radius: 20px; border: 1px solid #333;">
         <div style="text-align: center; margin-bottom: 30px;">
-          <img src="https://res.cloudinary.com/dtwcgfmar/image/upload/f_png,q_auto/v1777199141/SB_sticker-02_1_k3ulwd.png" 
+          <img src="https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/SB_sticker-02_1_k3ulwd.png" 
           alt="SocialBureau Logo" 
           width="150" 
           style="display: block; margin: 0 auto; width: 150px; height: auto; border: 0;" />

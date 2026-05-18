@@ -14,7 +14,7 @@ partnershipRoutes.get("/", partnershipController.getPartners);
 partnershipRoutes.get("/admin/:id", userAuthentication, adminAuthentication, partnershipController.getPartnerById);
 partnershipRoutes.get("/my-partnership", userAuthentication, partnershipController.getMyPartnership);
 partnershipRoutes.post("/my-partnership", userAuthentication, partnershipController.createOrUpdateMyPartnership);
-partnershipRoutes.post("/upload", userAuthentication, upload.single("image"), partnershipController.uploadImage);
+partnershipRoutes.post("/upload", userAuthentication, upload.single("image", "socialbureau-media/images/partnerships"), partnershipController.uploadImage);
 partnershipRoutes.get("/:param", partnershipController.getPartnerByParam);
 partnershipRoutes.put("/:id", userAuthentication, adminAuthentication, partnershipController.updatePartner);
 partnershipRoutes.delete("/:id", userAuthentication, adminAuthentication, partnershipController.deletePartner);

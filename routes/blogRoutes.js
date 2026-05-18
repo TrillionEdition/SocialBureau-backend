@@ -22,11 +22,11 @@ blogRoutes.post('/', userAuthentication, upload.fields([
   { name: 'sectionImage_7', maxCount: 1 },
   { name: 'sectionImage_8', maxCount: 1 },
   { name: 'sectionImage_9', maxCount: 1 },
-]), blogController.createBlog);
+], 'socialbureau-media/images/blog'), blogController.createBlog);
 
-// ========================================
-// ✅ STATIC ROUTES - MUST come FIRST
-// ========================================
+// ===================================================+
+// ✅ STATIC ROUTES - MUST come FIRST   
+// ==================================================+
 
 // Get stats
 blogRoutes.get('/stats', blogController.getStats);
@@ -73,7 +73,7 @@ blogRoutes.put('/:slug', userAuthentication, upload.fields([
   { name: 'sectionImage_7', maxCount: 1 },
   { name: 'sectionImage_8', maxCount: 1 },
   { name: 'sectionImage_9', maxCount: 1 },
-]), blogController.updateBlog);
+], 'socialbureau-media/images/blog'), blogController.updateBlog);
 
 // Delete blog
 blogRoutes.delete('/:slug', userAuthentication, blogController.deleteBlog);

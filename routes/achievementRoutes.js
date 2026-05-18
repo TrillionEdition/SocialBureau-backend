@@ -12,7 +12,7 @@ const isAdmin = require("../middlewares/isAdmin");
 const achievementRouter = express.Router();
 
 // Achievement CRUD operations...
-achievementRouter.post("/add", userAuthentication, isAdmin, upload.single("image"), addAchievement);
+achievementRouter.post("/add", userAuthentication, isAdmin, upload.single("image", "socialbureau-media/images/achievements"), addAchievement);
 achievementRouter.get("/user/:userId", getUserAchievements);
 achievementRouter.put("/:achievementId", userAuthentication, isAdmin, updateAchievement);
 achievementRouter.delete("/:achievementId", userAuthentication, isAdmin, deleteAchievement);

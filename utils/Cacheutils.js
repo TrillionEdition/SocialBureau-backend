@@ -6,6 +6,10 @@ const CACHE_EXPIRY = {
     SINGLE_JOB: 7200, // 2 hours for single job
     SEARCH_RESULTS: 1800, // 30 minutes for search results
     USER_DATA: 1800, // 30 minutes for user data
+    BLOGS_LIST: 3600, // 1 hour for blog list
+    SINGLE_BLOG: 7200, // 2 hours for single blog
+    EVENTS_LIST: 3600, // 1 hour for event list
+    SINGLE_EVENT: 7200, // 2 hours for single event
 };
 
 /**
@@ -69,10 +73,65 @@ const invalidateJobCaches = async () => {
     await invalidateCache(keysToInvalidate);
 };
 
+/**
+ * Invalidate all blog-related caches
+ * Used when a blog is created, updated, or deleted
+ */
+const invalidateBlogCaches = async () => {
+    const keysToInvalidate = [
+        "blogs:all",
+        "blogs:latest",
+        "blogs:stats",
+    ];
+
+    await invalidateCache(keysToInvalidate);
+};
+
+/**
+ * Invalidate all event-related caches
+ * Used when an event is created, updated, or deleted
+ */
+const invalidateEventCaches = async () => {
+    const keysToInvalidate = [
+        "events:all",
+        "events:upcoming",
+    ];
+
+    await invalidateCache(keysToInvalidate);
+};
+
+/**
+ * Invalidate all company achievement caches
+ * Used when a company achievement is created, updated, or deleted
+ */
+const invalidateCompanyAchievementCaches = async () => {
+    const keysToInvalidate = [
+        "company:achievements:all",
+    ];
+
+    await invalidateCache(keysToInvalidate);
+};
+
+/**
+ * Invalidate all client review caches
+ * Used when a client review is created, updated, or deleted
+ */
+const invalidateClientReviewCaches = async () => {
+    const keysToInvalidate = [
+        "client:reviews:all",
+    ];
+
+    await invalidateCache(keysToInvalidate);
+};
+
 module.exports = {
     getCache,
     setCache,
     invalidateCache,
     invalidateJobCaches,
+    invalidateBlogCaches,
+    invalidateEventCaches,
+    invalidateCompanyAchievementCaches,
+    invalidateClientReviewCaches,
     CACHE_EXPIRY,
 };

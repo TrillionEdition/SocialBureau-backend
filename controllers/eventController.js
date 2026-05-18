@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Event = require('../models/eventModel');
 const expressAsyncHandler = require("express-async-handler");
+const { getCache, setCache, invalidateCache, invalidateEventCaches, CACHE_EXPIRY } = require("../utils/Cacheutils");
 
 function sendError(res, status = 400, message = 'Bad Request', details = null) {
   const payload = { success: false, message };
@@ -67,6 +68,10 @@ const eventController = {
       });
 
       const saved = await newEvent.save();
+      
+      // Invalidate cache
+      await invalidateEventCaches();
+      
       return res.status(201).json({ success: true, data: saved });
     } catch (err) {
       console.error('createEvent error', err);
@@ -115,6 +120,16 @@ const eventController = {
         ];
       }
 
+      const cacheKey = `events:list:${JSON.stringify(filter)}:${p}:${l}:${sort}`;
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json({
+          success: true,
+          meta: cachedData.meta,
+          data: cachedData.data,
+        });
+      }
+
       const skip = (p - 1) * l;
 
       const [items, total] = await Promise.all([
@@ -126,7 +141,7 @@ const eventController = {
         Event.countDocuments(filter),
       ]);
 
-      return res.json({
+      const responseData = {
         success: true,
         meta: {
           page: p,
@@ -135,7 +150,11 @@ const eventController = {
           pages: Math.ceil(total / l),
         },
         data: items,
-      });
+      };
+
+      await setCache(cacheKey, responseData, CACHE_EXPIRY.EVENTS_LIST);
+
+      return res.json(responseData);
     } catch (err) {
       console.error('getEvents error', err);
       return sendError(res, 500, 'Internal server error', err.message);
@@ -150,8 +169,16 @@ const eventController = {
         return sendError(res, 400, 'Invalid event ID');
       }
 
+      const cacheKey = `event:${id}`;
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+
       const event = await Event.findById(id).populate('attendees', 'name email').lean();
       if (!event) return sendError(res, 404, 'Event not found');
+
+      await setCache(cacheKey, event, CACHE_EXPIRY.SINGLE_EVENT);
 
       return res.json({ success: true, data: event });
     } catch (err) {
@@ -204,6 +231,10 @@ const eventController = {
       const updated = await Event.findByIdAndUpdate(id, updates, { new: true }).lean();
       if (!updated) return sendError(res, 404, 'Event not found');
 
+      // Invalidate cache
+      await invalidateEventCaches();
+      await invalidateCache(`event:${id}`);
+
       return res.json({ success: true, data: updated });
     } catch (err) {
       console.error('updateEvent error', err);
@@ -222,6 +253,10 @@ const eventController = {
       const removed = await Event.findByIdAndDelete(id).lean();
       if (!removed) return sendError(res, 404, 'Event not found');
 
+      // Invalidate cache
+      await invalidateEventCaches();
+      await invalidateCache(`event:${id}`);
+
       return res.json({ success: true, data: removed });
     } catch (err) {
       console.error('deleteEvent error', err);
@@ -235,6 +270,12 @@ const eventController = {
       const { limit = 10 } = req.query;
       const l = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
 
+      const cacheKey = `events:upcoming:${l}`;
+      const cachedData = await getCache(cacheKey);
+      if (cachedData) {
+        return res.json({ success: true, data: cachedData });
+      }
+
       const now = new Date();
       const events = await Event.find({
         startDate: { $gte: now },
@@ -244,6 +285,8 @@ const eventController = {
         .sort('startDate')
         .limit(l)
         .lean();
+
+      await setCache(cacheKey, events, CACHE_EXPIRY.EVENTS_LIST);
 
       return res.json({ success: true, data: events });
     } catch (err) {
@@ -344,6 +387,9 @@ const eventController = {
       event.registrations = event.registrations || [];
       event.registrations.push({ name: name || '', email: emailLower });
       await event.save();
+
+      // Invalidate cache
+      await invalidateCache(`event:${id}`);
 
       return res.json({ success: true, message: 'Thank you. You have successfully registered for the event' });
     } catch (err) {

@@ -1,8 +1,12 @@
-const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const multer = require('multer');
 const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
+/**
+ * ☁️ CLOUDFLARE R2 UPLOAD MIDDLEWARE
+ * Using the R2 credentials from your .env file.
+ */
 
 if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET || !process.env.R2_PUBLIC_URL) {
   console.warn('Missing R2 env vars. Make sure R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET and R2_PUBLIC_URL are set.');
@@ -37,52 +41,102 @@ const multerInstance = multer({
     }
     cb(null, true);
   },
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
-async function uploadToR2(file, req) {
+async function uploadToR2(file, folderOrReq = 'images') {
   const ext = path.extname(file.originalname) || '.jpg';
   const uuid = crypto.randomUUID();
 
   const rawPublicUrl = process.env.R2_PUBLIC_URL || '';
   const publicUrl = ensureHttps(rawPublicUrl).replace(/\/$/, '');
   const bucket = process.env.R2_BUCKET || '';
-  
-  // Custom folder support
-  const folder = req?.uploadFolder ? req.uploadFolder.replace(/\/$/, '') : 'images';
-  const key = `${folder}/${uuid}${ext}`;
+  // Determine the folder name dynamically (supports either request object or string)
+  let folderName = 'images';
+  if (folderOrReq && typeof folderOrReq === 'object') {
+    folderName = folderOrReq.uploadFolder || 'images';
+  } else if (typeof folderOrReq === 'string') {
+    folderName = folderOrReq;
+  }
 
+  // Clean folder path: remove leading/trailing slashes
+  let cleanFolder = folderName.replace(/^\/+|\/+$/g, '');
+  
+  // If the folder starts with the bucket name followed by a slash, strip it
+  if (cleanFolder === bucket) {
+    cleanFolder = '';
+  } else if (cleanFolder.startsWith(`${bucket}/`)) {
+    cleanFolder = cleanFolder.substring(bucket.length + 1);
+  }
+
+  const key = cleanFolder ? `${cleanFolder}/${uuid}${ext}` : `${uuid}${ext}`;
   await r2.send(new PutObjectCommand({
     Bucket: bucket,
     Key: key,
     Body: file.buffer,
     ContentType: file.mimetype,
   }));
-  
+
   const finalUrl = `${publicUrl}/${key}`;
   console.log("☁️ R2 UPLOAD SUCCESS:");
   console.log("   - Key:", key);
   console.log("   - Final URL:", finalUrl);
-  
+
   file.location = finalUrl;
 }
 
-function wrapUpload(multerMiddleware) {
+/**
+ * 🗑️ DELETE FROM R2
+ * Deletes an object from R2 given its public URL.
+ */
+async function deleteFromR2(fileUrl) {
+  if (!fileUrl) return;
+
+  try {
+    const rawPublicUrl = process.env.R2_PUBLIC_URL || '';
+    const publicUrl = ensureHttps(rawPublicUrl).replace(/\/$/, '');
+    const bucket = process.env.R2_BUCKET || '';
+
+    // Extract key from URL
+    // URL format: https://public-url.com/folder/filename.ext
+    // Key format: folder/filename.ext
+    if (!fileUrl.startsWith(publicUrl)) {
+      console.warn('⚠️ Skipping delete: URL does not match R2_PUBLIC_URL', { fileUrl, publicUrl });
+      return;
+    }
+
+    const key = fileUrl.replace(`${publicUrl}/`, '');
+    
+    if (!key) return;
+
+    await r2.send(new DeleteObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    }));
+
+    console.log("🗑️ R2 DELETE SUCCESS:", key);
+  } catch (err) {
+    console.error("❌ R2 Delete Error:", err.message);
+  }
+}
+
+function wrapUpload(multerMiddleware, folder) {
   return async function (req, res, next) {
     multerMiddleware(req, res, async (err) => {
       if (err) return next(err);
       try {
         if (req.file) {
-          await uploadToR2(req.file, req);
+          await uploadToR2(req.file, folder || req);
         }
         if (req.files) {
           const files = Array.isArray(req.files)
             ? req.files
             : Object.values(req.files).flat();
-          await Promise.all(files.map(f => uploadToR2(f, req)));
+          await Promise.all(files.map(f => uploadToR2(f, folder || req)));
         }
         next();
       } catch (uploadErr) {
+        console.error("❌ R2 Upload Error:", uploadErr.message);
         next(uploadErr);
       }
     });
@@ -90,10 +144,11 @@ function wrapUpload(multerMiddleware) {
 }
 
 const upload = {
-  single: (fieldName) => wrapUpload(multerInstance.single(fieldName)),
-  array: (fieldName, maxCount) => wrapUpload(multerInstance.array(fieldName, maxCount)),
-  fields: (fields) => wrapUpload(multerInstance.fields(fields)),
-  any: () => wrapUpload(multerInstance.any()),
+  single: (fieldName, folder) => wrapUpload(multerInstance.single(fieldName), folder),
+  array: (fieldName, maxCount, folder) => wrapUpload(multerInstance.array(fieldName, maxCount), folder),
+  fields: (fields, folder) => wrapUpload(multerInstance.fields(fields), folder),
+  any: (folder) => wrapUpload(multerInstance.any(), folder),
+  deleteFromR2,
 };
 
 module.exports = upload;

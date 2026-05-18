@@ -9,13 +9,13 @@ const jobApplicationSchema = new mongoose.Schema({
     jobModel: {
         type: String,
         required: true,
-        enum: ['JobPosting', 'ExternalJob'],
-        default: 'JobPosting'
+        enum: ['JobPosting', 'ExternalJob', 'Job'],
+        default: 'Job'
     },
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: true
+        required: false
     },
     candidateName: { type: String, required: true },
     candidateEmail: { type: String, required: true },
