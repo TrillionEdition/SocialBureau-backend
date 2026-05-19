@@ -13,11 +13,11 @@ const userSchema = new mongoose.Schema(
     },
     email: {
       type: String,
-      require: true,
+      required: true,
     },
     password: {
       type: String,
-      require: true,
+      required: true,
       minLength: [5, "Minimum 5 characters required"]
     },
     resetPasswordToken: {
@@ -56,6 +56,16 @@ const userSchema = new mongoose.Schema(
     // ClickUp ID (optional). Indexed for fast lookup; make unique if your app requires one-to-one mapping.
     clickupId: {
       type: Number,
+      index: true,
+    },
+
+    clickupListId: {
+      type: String,
+      index: true,
+    },
+
+    clickupChatViewId: {
+      type: String,
       index: true,
     },
 

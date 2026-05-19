@@ -1,5 +1,5 @@
 const express = require("express")
-const bcrypt = require("bcrypt")
+const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
 const asyncHandler = require("express-async-handler")
 const User = require("../models/userModel")
@@ -21,7 +21,7 @@ function getUrlFromFile(f) {
 const userController = {
 
   register: asyncHandler(async (req, res) => {
-    const { clickupId, email, name, password, role, emp_id, doj, rate, phone, isEmployee } = req.body;
+    const { clickupId, clickupListId, clickupChatViewId, email, name, password, role, emp_id, doj, rate, phone, isEmployee } = req.body;
     console.log(" Register attempt with email:", email);
 
     if (email) {
@@ -207,23 +207,26 @@ const userController = {
 
 
     const hashed_password = await bcrypt.hash(password, 10);
-    const now = new Date();
-    const joinDate = new Date(doj);
+    let exp = "0";
 
-    let years = now.getFullYear() - joinDate.getFullYear();
-    let months = now.getMonth() - joinDate.getMonth();
-    let days = now.getDate() - joinDate.getDate();
+    if (doj) {
+      const now = new Date();
+      const joinDate = new Date(doj);
 
-    if (days < 0) {
-      months--;
-      days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      let years = now.getFullYear() - joinDate.getFullYear();
+      let months = now.getMonth() - joinDate.getMonth();
+      let days = now.getDate() - joinDate.getDate();
+
+      if (days < 0) {
+        months--;
+        days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      }
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+      exp = `${years}.${months}`;
     }
-    if (months < 0) {
-      years--;
-      months += 12;
-    }
-
-    const exp = `${years}.${months}`;
 
     const userCreated = await User.create({
       clickupId,
@@ -240,6 +243,8 @@ const userController = {
       exp,
       tools: toolIds,
       clients: uniqueClientIds,
+      clickupListId,
+      clickupChatViewId,
     });
 
 
@@ -337,10 +342,21 @@ const userController = {
       throw new Error("User not found");
     }
 
-    const passwordMatch = await bcrypt.compare(password, userExist.password);
-    if (!passwordMatch) {
+    if (!password) {
       res.status(400);
-      throw new Error("Invalid credentials");
+      throw new Error("Password is required");
+    }
+
+    try {
+      const passwordMatch = await bcrypt.compare(password, userExist.password || "");
+      if (!passwordMatch) {
+        res.status(400);
+        throw new Error("Invalid credentials");
+      }
+    } catch (bcryptErr) {
+      console.error("❌ Bcrypt error:", bcryptErr);
+      res.status(500);
+      throw new Error("Internal authentication error");
     }
 
     // 🔐 ROLE & VERIFICATION CHECK - Fixed logic
@@ -348,13 +364,15 @@ const userController = {
     const isVerified = userExist.verification === true; // Boolean comparison only
 
     const payload = {
-      id: userExist._id,
+      id: userExist._id.toString(),
+      name: userExist.name,
       email: userExist.email,
       role: userExist.role,
-      verification: userExist.verification,
+      verification: !!userExist.verification,
     };
 
-    const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
+    const secret = process.env.JWT_SECRET_KEY || "SocialBureau";
+    const token = jwt.sign(payload, secret, {
       expiresIn: "1d",
     });
 
@@ -374,6 +392,9 @@ const userController = {
         email: userExist.email,
         role: userExist.role,
         verification: userExist.verification,
+        clickupId: userExist.clickupId,
+        clickupListId: userExist.clickupListId,
+        clickupChatViewId: userExist.clickupChatViewId,
         isEmployee,
         isVerified,
       },
@@ -389,7 +410,7 @@ const userController = {
     try {
       const users = await User.find(
         {},
-        "name rating exp rate coverImage idCard tools role"
+        "name rating exp rate coverImage idCard tools role email clickupId clickupListId clickupChatViewId"
       )
         .populate({
           path: "tools",
@@ -816,7 +837,9 @@ const userController = {
       user.exp = req.body.exp || user.exp;
       user.doj = req.body.doj || user.doj;
       user.emp_id = req.body.emp_id || user.emp_id;
-      // user.clickupId = req.body.clickupId || user.clickupId;
+      user.clickupId = req.body.clickupId || user.clickupId;
+      user.clickupListId = req.body.clickupListId || user.clickupListId;
+      user.clickupChatViewId = req.body.clickupChatViewId || user.clickupChatViewId;
 
       // if (req.body.isEmployee !== undefined) {
       //   user.isEmployee = req.body.isEmployee;
@@ -1060,6 +1083,18 @@ const userController = {
     }
   }),
 
+
+  deleteUser: asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
+
+    if (user) {
+      await User.findByIdAndDelete(req.params.id);
+      res.json({ message: "User removed successfully" });
+    } else {
+      res.status(404);
+      throw new Error("User not found");
+    }
+  }),
 
 };
 

@@ -30,6 +30,10 @@ const meetingSchema = new mongoose.Schema(
     gmeetLink: {
       type: String,
     },
+    linkSent: {
+      type: Boolean,
+      default: false,
+    },
     status: {
       type: String,
       enum: ["scheduled", "completed", "cancelled"],

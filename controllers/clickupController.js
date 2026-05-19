@@ -11,12 +11,60 @@ const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 const TEAM_ID = "9014733918";
 const LIST_ID = process.env.CLICKUP_NEW_LIST_ID || process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
 
+// Helper to get user's ClickUp configuration
+const getUserConfig = async (userId) => {
+  const user = await User.findById(userId);
+  return {
+    listId: user?.clickupListId || LIST_ID,
+    chatViewId: user?.clickupChatViewId || null,
+    clickupId: user?.clickupId || null,
+    teamId: TEAM_ID // Assuming same team for now, can be expanded
+  };
+};
+
 
 
 // Escape user input for safe usage in RegExp
 function escapeRegex(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// Helper to get or create a host task for view attachments
+const getOrCreateHostTask = async (listId) => {
+  try {
+    // 1. Search for existing "Channel Media Host" task
+    const searchUrl = `https://api.clickup.com/api/v2/list/${listId}/task?custom_task_ids=true&include_subtasks=true`;
+    const response = await axios.get(searchUrl, {
+      headers: { Authorization: CLICKUP_TOKEN }
+    });
+
+    const existingHost = response.data.tasks.find(t => t.name === "Channel Media Host");
+    if (existingHost) return existingHost.id;
+
+    // 2. Create if not found
+    const createUrl = `https://api.clickup.com/api/v2/list/${listId}/task`;
+    const createRes = await axios.post(createUrl, {
+      name: "Channel Media Host",
+      description: "This task holds attachments sent via the Client Portal Chat View.",
+      status: "to do"
+    }, {
+      headers: { Authorization: CLICKUP_TOKEN }
+    });
+
+    return createRes.data.id;
+  } catch (error) {
+    console.error("❌ Error in getOrCreateHostTask:", error.response?.data || error.message);
+    // Fallback: just return the first task ID if any
+    try {
+      const fallbackUrl = `https://api.clickup.com/api/v2/list/${listId}/task`;
+      const fallbackRes = await axios.get(fallbackUrl, {
+        headers: { Authorization: CLICKUP_TOKEN }
+      });
+      if (fallbackRes.data.tasks.length > 0) return fallbackRes.data.tasks[0].id;
+    } catch (e) {}
+    throw new Error("Could not find or create a host task for attachments");
+  }
+};
 
 const clickupController = {
   getTaskById: expressAsyncHandler(async (req, res) => {
@@ -61,37 +109,84 @@ const clickupController = {
 
   proxyClickUpImage: expressAsyncHandler(async (req, res) => {
     try {
-      const { url } = req.query;
-      if (!url) return res.status(400).send("No URL provided");
-      
+      let targetUrl = req.query.url;
+      if (!targetUrl) return res.status(400).send("No URL provided");
+
       if (!CLICKUP_TOKEN) {
         console.error("❌ CLICKUP_TOKEN is missing in backend environment!");
         return res.status(500).send("Backend configuration error");
       }
 
-      console.log(`🖼️ Proxying image: ${url}`);
-      
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-        responseType: 'stream'
-      });
+      console.log(`🖼️ Proxying image: ${targetUrl}`);
 
-      // Forward headers
-      res.setHeader('Content-Type', response.headers['content-type']);
-      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+      // Helper to determine if we should send the ClickUp token
+      const shouldSendToken = (url) => {
+        const isClickUpDomain = url.includes('clickup.com');
+        const isSigned = url.includes('X-Amz-Signature') || url.includes('AWSAccessKeyId') || url.includes('Expires=');
+        return isClickUpDomain && !isSigned;
+      };
 
-      response.data.pipe(res);
+      const fetchWithRedirects = async (url, depth = 0) => {
+        if (depth > 5) throw new Error("Too many redirects");
+
+        const headers = {};
+        if (shouldSendToken(url)) {
+          headers.Authorization = CLICKUP_TOKEN;
+        }
+
+        const response = await axios.get(url, {
+          headers,
+          responseType: 'stream',
+          maxRedirects: 0,
+          validateStatus: (status) => (status >= 200 && status < 400)
+        });
+
+        if (response.status >= 300 && response.status < 400 && response.headers.location) {
+          let nextUrl = response.headers.location;
+          // Handle relative redirects
+          if (nextUrl.startsWith('/')) {
+            const urlObj = new URL(url);
+            nextUrl = `${urlObj.protocol}//${urlObj.host}${nextUrl}`;
+          }
+          console.log(`↪️ [Depth ${depth}] Redirecting to: ${nextUrl}`);
+          return fetchWithRedirects(nextUrl, depth + 1);
+        }
+
+        return response;
+      };
+
+      const finalResponse = await fetchWithRedirects(targetUrl);
+
+      // Forward essential headers
+      if (finalResponse.headers['content-type']) {
+        res.setHeader('Content-Type', finalResponse.headers['content-type']);
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600'); 
+
+      finalResponse.data.pipe(res);
     } catch (error) {
       console.error("❌ Proxy Error:", error.message);
-      res.status(500).send("Error proxying image");
+      res.status(500).send(`Error proxying image: ${error.message}`);
     }
   }),
 
   uploadAttachment: expressAsyncHandler(async (req, res) => {
     try {
-      const { viewId } = req.params;
-      console.log(`📂 Upload request for View ID: ${viewId}`);
+      let { viewId } = req.params;
+      const config = await getUserConfig(req.user.id);
       
+      // If viewId is a placeholder or not provided, use user's config
+      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
+        viewId = config.chatViewId;
+      }
+
+      if (!viewId) {
+        console.error("❌ Upload failed: No Chat View ID found");
+        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+      }
+
+      console.log(`📂 Upload request for View ID: ${viewId}`);
+
       if (!req.file) {
         console.error("❌ No file found in request");
         return res.status(400).json({ success: false, message: "No file uploaded" });
@@ -99,7 +194,25 @@ const clickupController = {
 
       console.log(`📄 File info: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
 
-      const url = `https://api.clickup.com/api/v2/view/${viewId}/attachment`;
+      console.log(`📄 File info: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
+
+      // Intelligently decide which endpoint to use.
+      // ClickUp ONLY supports attachments on TASKS. 
+      const isView = viewId.includes('-');
+      let targetTaskId = viewId;
+      
+      if (isView) {
+        console.log(`⚠️ View ID detected [${viewId}]. Redirecting attachment to host task...`);
+        // If it's a view, we need to find or create a "Host Task" in the list to hold the attachment
+        if (!config.listId) {
+          return res.status(400).json({ success: false, message: "No List ID configured to host view attachments" });
+        }
+        
+        targetTaskId = await getOrCreateHostTask(config.listId);
+        console.log(`🎯 Using Host Task: ${targetTaskId}`);
+      }
+
+      const url = `https://api.clickup.com/api/v2/task/${targetTaskId}/attachment`;
       console.log(`📤 Sending to ClickUp: ${url}`);
 
       const form = new FormData();
@@ -115,20 +228,135 @@ const clickupController = {
         },
       });
 
+      console.log("✅ ClickUp Upload Success:", response.data);
+
       // Cleanup local temp file
-      fs.unlinkSync(req.file.path);
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+
+      // Auto-post a comment in the chat view containing a native rich-text attachment or image block
+      try {
+        const senderName = req.user?.name || "Client";
+        const att = response.data;
+        const ext = (att.extension || att.name?.split('.').pop() || '').toLowerCase();
+        const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'svg'].includes(ext);
+
+        const commentUrl = isView 
+          ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
+          : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+
+        console.log(`📝 Auto-posting native rich attachment comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
+
+        // Format a clean, attributed sender tag
+        const senderTag = `[Sent by ${senderName}]: `;
+
+        let commentBody = {};
+
+        if (isImg) {
+          // Create a native ClickUp image block comment!
+          commentBody = {
+            comment: [
+              {
+                text: senderTag
+              },
+              {
+                type: "image",
+                text: att.name || att.title || "Shared Image",
+                image: {
+                  id: att.id,
+                  name: att.name || att.title,
+                  title: att.title || att.name,
+                  type: ext,
+                  extension: `image/${ext}`,
+                  thumbnail_large: att.thumbnail_large || att.url,
+                  thumbnail_medium: att.thumbnail_medium || att.url,
+                  thumbnail_small: att.thumbnail_small || att.url,
+                  url: att.url,
+                  uploaded: true
+                },
+                attributes: {
+                  width: "300",
+                  "data-id": att.id
+                }
+              },
+              {
+                text: "\n"
+              }
+            ],
+            notify_all: true
+          };
+        } else {
+          // Create a native ClickUp file/attachment block comment!
+          commentBody = {
+            comment: [
+              {
+                text: senderTag
+              },
+              {
+                type: "attachment",
+                text: att.name || att.title || "Shared File",
+                attachment: {
+                  id: att.id,
+                  name: att.name || att.title,
+                  title: att.title || att.name,
+                  extension: ext,
+                  thumbnail_large: att.thumbnail_large || att.url,
+                  thumbnail_medium: att.thumbnail_medium || att.url,
+                  thumbnail_small: att.thumbnail_small || att.url,
+                  url: att.url,
+                  uploaded: true
+                },
+                attributes: {
+                  "data-id": att.id
+                }
+              },
+              {
+                text: "\n"
+              }
+            ],
+            notify_all: true
+          };
+        }
+
+        await axios.post(commentUrl, commentBody, {
+          headers: {
+            Authorization: CLICKUP_TOKEN,
+            'Content-Type': 'application/json'
+          },
+        });
+        console.log("✅ Auto-posted native rich attachment comment successfully!");
+      } catch (commentErr) {
+        console.error("⚠️ Failed to auto-post rich attachment comment:", commentErr.response?.data || commentErr.message);
+      }
 
       res.json({
         success: true,
         attachment: response.data
       });
     } catch (error) {
-      console.error("❌ ClickUp API Error (uploadAttachment):", error.response?.data || error.message);
+      const errorData = error.response?.data;
+      const status = error.response?.status;
+      
+      console.error(`❌ ClickUp API Error (uploadAttachment) [Status ${status}]:`, JSON.stringify(errorData, null, 2) || error.message);
+      
       // Try to cleanup even on error
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
+
+      // If View attachment is not supported (404), explain why
+      if (status === 404) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "ClickUp API Error: This chat view does not support direct attachments. Try uploading to a task instead.",
+          details: errorData 
+        });
+      }
+
+      res.status(status || 500).json({ 
+        success: false, 
+        message: "Failed to upload to ClickUp",
+        error: errorData || error.message 
+      });
     }
   }),
 
@@ -216,14 +444,20 @@ const clickupController = {
 
   getTasks: expressAsyncHandler(async (req, res) => {
     try {
+      const config = await getUserConfig(req.user.id);
+      const userListId = config.listId;
+
       // 1. Fetch List Details to get ALL possible statuses
-      const listUrl = `https://api.clickup.com/api/v2/list/${LIST_ID}`;
+      const listUrl = `https://api.clickup.com/api/v2/list/${userListId}`;
       const listRes = await axios.get(listUrl, { headers: { Authorization: CLICKUP_TOKEN } });
       const allStatuses = listRes.data.statuses || [];
 
-      // 2. Fetch Tasks
-      const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task?include_closed=true`;
-      console.log(`🔗 Fetching from List [${LIST_ID}]:`, url);
+      // 2. Fetch Tasks - Filter by assignee if clickupId is set
+      let url = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true`;
+      if (config.clickupId) {
+        url += `&assignees[]=${config.clickupId}`;
+      }
+      console.log(`🔗 Fetching from List [${userListId}] (Filtered: ${!!config.clickupId}):`, url);
 
       const response = await axios.get(url, {
         headers: { Authorization: CLICKUP_TOKEN },
@@ -279,7 +513,7 @@ const clickupController = {
 
       // Comprehensive Status Breakdown (Dynamic)
       const statusBreakdown = {};
-      
+
       // Initialize with all list statuses so they always appear in the chart/legend
       allStatuses.forEach(s => {
         statusBreakdown[s.status.toLowerCase()] = {
@@ -562,7 +796,10 @@ const clickupController = {
 
       console.log("📋 Final Payload:", JSON.stringify(taskPayload, null, 2));
 
-      const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task`;
+      const config = await getUserConfig(req.user.id);
+      const userListId = config.listId;
+
+      const url = `https://api.clickup.com/api/v2/list/${userListId}/task`;
       console.log("📋 POST URL:", url);
 
 
@@ -619,9 +856,24 @@ const clickupController = {
 
   getChatComments: expressAsyncHandler(async (req, res) => {
     try {
-      const { viewId } = req.params;
-      const url = `https://api.clickup.com/api/v2/view/${viewId}/comment`;
-      console.log(`🔗 Fetching Chat Comments from View [${viewId}]`);
+      let { viewId } = req.params;
+      const config = await getUserConfig(req.user.id);
+
+      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
+        viewId = config.chatViewId;
+      }
+
+      if (!viewId) {
+        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+      }
+
+      // Detect if Task ID or View ID
+      const isView = viewId.includes('-');
+      const url = isView 
+        ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
+        : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+
+      console.log(`🔗 Fetching Chat Comments from ${isView ? 'View' : 'Task'} [${viewId}]`);
 
       const response = await axios.get(url, {
         headers: { Authorization: CLICKUP_TOKEN },
@@ -639,17 +891,34 @@ const clickupController = {
 
   postChatComment: expressAsyncHandler(async (req, res) => {
     try {
-      const { viewId } = req.params;
+      let { viewId } = req.params;
       const { comment_text } = req.body;
-      
-      const url = `https://api.clickup.com/api/v2/view/${viewId}/comment`;
-      console.log(`📝 Posting Comment to View [${viewId}]`);
+      const config = await getUserConfig(req.user.id);
+
+      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
+        viewId = config.chatViewId;
+      }
+
+      if (!viewId) {
+        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+      }
+
+      // Detect if Task ID or View ID
+      const isView = viewId.includes('-');
+      const url = isView 
+        ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
+        : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+
+      console.log(`📝 Posting Comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
+
+      const senderName = req.user.name || "Client";
+      const attributionText = `[Sent by ${senderName}]: ${comment_text}`;
 
       const response = await axios.post(url, {
-        comment_text,
+        comment_text: attributionText,
         notify_all: true
       }, {
-        headers: { 
+        headers: {
           Authorization: CLICKUP_TOKEN,
           'Content-Type': 'application/json'
         },
@@ -663,7 +932,205 @@ const clickupController = {
       console.error("❌ ClickUp API Error (postChatComment):", error.response?.data || error.message);
       res.status(500).json({ success: false, error: error.response?.data || error.message });
     }
+  }),
+
+  getGeneralActivity: expressAsyncHandler(async (req, res) => {
+    try {
+      const config = await getUserConfig(req.user.id);
+      const userListId = config.listId;
+
+      console.log(`🔗 Fetching Combined Task Log & Activity for List [${userListId}]`);
+      
+      // 0. Dynamically find the Team ID (Workspace) to avoid 404s
+      let dynamicTeamId = TEAM_ID;
+      try {
+        const teamRes = await axios.get('https://api.clickup.com/api/v2/team', { 
+          headers: { Authorization: CLICKUP_TOKEN },
+          timeout: 5000
+        });
+        if (teamRes.data.teams?.length > 0) {
+          dynamicTeamId = teamRes.data.teams[0].id;
+          console.log(`✅ Using Workspace ID: ${dynamicTeamId}`);
+        }
+      } catch (err) {
+        console.warn("⚠️ Failed to fetch dynamic Team ID, falling back to hardcoded ID.");
+      }
+
+      // 1. Fetch ALL Tasks (Base Log)
+      const tasksUrl = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true&subtasks=true&limit=60`;
+      const tasksRes = await axios.get(tasksUrl, { headers: { Authorization: CLICKUP_TOKEN } });
+      const tasks = tasksRes.data.tasks || [];
+
+      let mergedActivity = [];
+
+      // 2. Map Task Creations, Statuses, and Attachments (Baseline data)
+      tasks.forEach(task => {
+        try {
+          const taskName = task.name || 'Project Task';
+          const userName = task.creator?.username || 'Team Member';
+
+          // A. Always add Creation Event
+          if (task.date_created) {
+            const createDate = new Date(parseInt(task.date_created));
+            if (!isNaN(createDate.getTime())) {
+              mergedActivity.push({
+                id: `create-${task.id}`,
+                user: userName,
+                target: taskName,
+                type: 'create',
+                time: createDate.toISOString()
+              });
+            }
+          }
+
+          // B. Add "Completed" Event if task is currently closed/done
+          const statusStr = (task.status?.status || '').toLowerCase();
+          const isClosed = task.status?.type === 'closed' || statusStr.includes('complete') || statusStr.includes('done') || statusStr.includes('closed');
+          
+          if (isClosed && (task.date_done || task.date_updated)) {
+            const doneDate = new Date(parseInt(task.date_done || task.date_updated));
+            if (!isNaN(doneDate.getTime())) {
+              mergedActivity.push({
+                id: `done-static-${task.id}`,
+                user: userName,
+                target: taskName,
+                type: 'complete',
+                time: doneDate.toISOString()
+              });
+            }
+          }
+
+          // C. Add "In Progress" Event if task is currently active
+          const isInProgress = task.status?.type === 'in-progress' || statusStr.includes('progress') || statusStr.includes('working') || statusStr.includes('active');
+          if (isInProgress && task.date_updated) {
+            const progressDate = new Date(parseInt(task.date_updated));
+            if (!isNaN(progressDate.getTime())) {
+              mergedActivity.push({
+                id: `progress-static-${task.id}`,
+                user: userName,
+                target: taskName,
+                type: 'in-progress',
+                time: progressDate.toISOString()
+              });
+            }
+          }
+
+          // D. Add Historical Attachments
+          if (task.attachments && Array.isArray(task.attachments)) {
+            task.attachments.forEach(att => {
+              if (att.date) {
+                const attDate = new Date(parseInt(att.date));
+                if (!isNaN(attDate.getTime())) {
+                  const ext = att.extension || (att.url ? att.url.split('.').pop().split('?')[0].toLowerCase() : '');
+                  mergedActivity.push({
+                    id: `upload-${att.id}`,
+                    user: userName,
+                    target: taskName,
+                    type: 'upload',
+                    image: att.thumbnail_large || att.url,
+                    url: att.url,
+                    extension: ext,
+                    time: attDate.toISOString()
+                  });
+                }
+              }
+            });
+          }
+        } catch (err) {
+          console.warn(`⚠️ Error mapping task ${task.id}:`, err.message);
+        }
+      });
+
+
+      // 3. Layer in Recent Team Activity (Live Events)
+      try {
+        const activityUrl = `https://api.clickup.com/api/v2/team/${dynamicTeamId}/activity?list_ids[]=${userListId}&limit=100`;
+        const activityRes = await axios.get(activityUrl, { 
+          headers: { Authorization: CLICKUP_TOKEN },
+          timeout: 8000
+        });
+        
+        const rawActivities = activityRes.data.activities || [];
+
+        rawActivities.forEach(act => {
+          try {
+            let type = null;
+            let image = null;
+            let url = null;
+            let extension = null;
+            
+            const after = act.details?.after;
+            const afterStr = (typeof after === 'object' ? after?.status || after?.priority || JSON.stringify(after) : String(after || '')).toLowerCase();
+
+            switch(act.type) {
+              case 'statusUpdated':
+                if (afterStr.includes('complete') || afterStr.includes('closed') || afterStr.includes('done')) {
+                  type = 'complete';
+                } else if (afterStr.includes('progress') || afterStr.includes('working') || afterStr.includes('active')) {
+                  type = 'in-progress';
+                }
+                break;
+              case 'priorityUpdated':
+                if (afterStr === '1' || afterStr.includes('high') || afterStr.includes('urgent')) {
+                  type = 'priority';
+                }
+                break;
+              case 'taskDeleted':
+                type = 'delete';
+                break;
+              case 'attachmentAdded':
+                type = 'upload';
+                const att = act.details?.attachment;
+                image = att?.thumbnail_large || att?.url;
+                url = att?.url;
+                extension = att?.extension || (url ? url.split('.').pop().split('?')[0].toLowerCase() : '');
+                break;
+            }
+
+            if (type && act.date) {
+              const actDate = new Date(parseInt(act.date));
+              if (!isNaN(actDate.getTime())) {
+                mergedActivity.push({
+                  id: `act-${act.id}`,
+                  user: act.user?.username || 'Team Member',
+                  target: act.task?.name || 'Project Task',
+                  type,
+                  image,
+                  url,
+                  extension,
+                  time: actDate.toISOString()
+                });
+              }
+            }
+          } catch (itemErr) {
+            console.warn("⚠️ Error mapping activity item:", itemErr.message);
+          }
+        });
+      } catch (actError) {
+        console.error("⚠️ Team Activity API Failed:", actError.response?.data || actError.message);
+      }
+
+
+      // 4. Deduplicate and Sort
+      const finalActivity = Array.from(
+        mergedActivity.reduce((map, item) => map.set(item.id, item), new Map()).values()
+      ).sort((a, b) => new Date(b.time) - new Date(a.time))
+       .slice(0, 50);
+
+      res.json({
+        success: true,
+        activity: finalActivity
+      });
+    } catch (e) {
+      console.error("❌ Fatal Activity Error:", e.response?.data || e.message);
+      res.status(500).json({ success: false, error: e.message });
+    }
   })
+
+
+
+
+
 };
 
 module.exports = clickupController;

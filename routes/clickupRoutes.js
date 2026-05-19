@@ -5,18 +5,22 @@ const multer = require('multer');
 const upload = multer({ dest: 'uploads/' }); // Temporary storage before proxying to ClickUp
 
 
-clickupRoutes.get('/tasks', clickupController.getTasks);
-clickupRoutes.get('/tasks/:taskId', clickupController.getTaskById);
-clickupRoutes.get('/time', clickupController.getTime);
-clickupRoutes.get('/user-task', clickupController.getTasksById);
-clickupRoutes.get('/user-details', clickupController.getUserDetails);
-clickupRoutes.get('/test', clickupController.testClickUp);
-clickupRoutes.get('/tasks/:taskId/activity', clickupController.getTaskActivity);
-clickupRoutes.post('/create-task', clickupController.createTask);
-clickupRoutes.get('/chat-messages/:viewId', clickupController.getChatComments);
-clickupRoutes.post('/chat-messages/:viewId', clickupController.postChatComment);
-clickupRoutes.post('/chat-messages/:viewId/attachment', upload.single('attachment'), clickupController.uploadAttachment);
+const userAuthentication = require("../middlewares/userAuthentication");
+
+clickupRoutes.get('/tasks', userAuthentication, clickupController.getTasks);
+clickupRoutes.get('/tasks/:taskId', userAuthentication, clickupController.getTaskById);
+clickupRoutes.get('/time', userAuthentication, clickupController.getTime);
+clickupRoutes.get('/user-task', userAuthentication, clickupController.getTasksById);
+clickupRoutes.get('/user-details', userAuthentication, clickupController.getUserDetails);
+clickupRoutes.get('/test', userAuthentication, clickupController.testClickUp);
+clickupRoutes.get('/tasks/:taskId/activity', userAuthentication, clickupController.getTaskActivity);
+clickupRoutes.post('/create-task', userAuthentication, clickupController.createTask);
+clickupRoutes.get('/chat-messages/:viewId', userAuthentication, clickupController.getChatComments);
+clickupRoutes.post('/chat-messages/:viewId', userAuthentication, clickupController.postChatComment);
+clickupRoutes.post('/chat-messages/:viewId/attachment', userAuthentication, upload.single('attachment'), clickupController.uploadAttachment);
 clickupRoutes.get('/image-proxy', clickupController.proxyClickUpImage);
+clickupRoutes.get('/general-activity', userAuthentication, clickupController.getGeneralActivity);
+
 
 
 // Test form for debugging
