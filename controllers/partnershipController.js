@@ -379,6 +379,7 @@ const partnershipController = {
         details: details || (partner ? partner.details : {}),
         templateId: templateId || (partner ? partner.templateId : "template1"),
         isFree: req.body.isFree || false,
+        hasPaid: req.body.hasPaid || (partner ? partner.hasPaid : false),
         role: "partnership",
         user: userId,
         updatedBy: userId
@@ -452,11 +453,12 @@ const partnershipController = {
   // Get dashboard counts for Hub
   getDashboardStats: asyncHandler(async (req, res) => {
     try {
-      const studentCount = await Partnership.countDocuments({ 
-        $or: [{ category: "student" }, { isFree: true }] 
-      });
       const influencerCount = await Partnership.countDocuments({ 
-        category: "influencer" 
+        category: "influencer",
+        templateId: "influencer"
+      });
+      const studentCount = await Partnership.countDocuments({ 
+        templateId: { $ne: "influencer" }
       });
 
       res.status(200).json({

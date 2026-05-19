@@ -5,6 +5,7 @@ const multer = require('multer');
 const upload = multer({ dest: 'uploads/' }); // Temporary storage before proxying to ClickUp
 
 
+<<<<<<< HEAD
 const userAuthentication = require("../middlewares/userAuthentication");
 
 clickupRoutes.get('/tasks', userAuthentication, clickupController.getTasks);
@@ -18,6 +19,20 @@ clickupRoutes.post('/create-task', userAuthentication, clickupController.createT
 clickupRoutes.get('/chat-messages/:viewId', userAuthentication, clickupController.getChatComments);
 clickupRoutes.post('/chat-messages/:viewId', userAuthentication, clickupController.postChatComment);
 clickupRoutes.post('/chat-messages/:viewId/attachment', userAuthentication, upload.single('attachment'), clickupController.uploadAttachment);
+=======
+clickupRoutes.get('/tasks', clickupController.getTasks);
+clickupRoutes.get('/tasks/:taskId', clickupController.getTaskById);
+clickupRoutes.get('/time', clickupController.getTime);
+clickupRoutes.get('/user-task', clickupController.getTasksById);
+clickupRoutes.get('/user-details', clickupController.getUserDetails);
+clickupRoutes.get('/member-details', clickupController.getMemberDetails);
+clickupRoutes.get('/test', clickupController.testClickUp);
+clickupRoutes.get('/tasks/:taskId/activity', clickupController.getTaskActivity);
+clickupRoutes.post('/create-task', clickupController.createTask);
+clickupRoutes.get('/chat-messages/:viewId', clickupController.getChatComments);
+clickupRoutes.post('/chat-messages/:viewId', clickupController.postChatComment);
+clickupRoutes.post('/chat-messages/:viewId/attachment', upload.single('attachment'), clickupController.uploadAttachment);
+>>>>>>> 96385c461d0bbf70c26224e3ee74909b23d1b677
 clickupRoutes.get('/image-proxy', clickupController.proxyClickUpImage);
 clickupRoutes.get('/general-activity', userAuthentication, clickupController.getGeneralActivity);
 

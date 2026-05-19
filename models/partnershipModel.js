@@ -61,6 +61,10 @@ const partnershipSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    hasPaid: {
+      type: Boolean,
+      default: false,
+    },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

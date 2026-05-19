@@ -1,6 +1,7 @@
 const express = require("express");
 const User = require("../models/userModel");
 const Achievement = require("../models/achievementModel");
+const TeamMember = require("../models/teamMemberModel");
 const expressAsyncHandler = require("express-async-handler");
 const { default: axios } = require("axios");
 const { getCache, setCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
@@ -751,6 +752,134 @@ const clickupController = {
       }
 
       return res.json({ ...responseData, source: "origin" });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Internal server error", error: err.message });
+    }
+  }),
+
+  getMemberDetails: expressAsyncHandler(async (req, res) => {
+    try {
+      const { slug } = req.query;
+      if (!slug) {
+        return res.status(400).json({ message: "Slug not provided" });
+      }
+
+      console.log("Fetching details for team member slug:", slug);
+
+      const member = await TeamMember.findOne({ slug })
+        .populate({
+          path: "user",
+          populate: [
+            {
+              path: "tools",
+              select: "toolName url icon description -_id"
+            },
+            {
+              path: "clients",
+              select: "name website logo -_id"
+            },
+            {
+              path: "reviews",
+              select: "name company review rating createdAt -_id",
+              match: { approved: true }
+            },
+            {
+              path: "achievements",
+              select: "title description image createdAt"
+            }
+          ]
+        });
+
+      if (!member) {
+        return res.status(404).json({ message: "Team member not found" });
+      }
+
+      if (member.user) {
+        const u = member.user;
+        if (!u.achievements || u.achievements.length === 0) {
+          const directAchievements = await Achievement.find({ user: u._id })
+            .select("title description image createdAt")
+            .lean();
+          if (directAchievements.length > 0) {
+            u.achievements = directAchievements;
+          }
+        }
+      }
+
+      const clickupId = member.user?.clickupId || null;
+      let clickupPayload = null;
+
+      if (clickupId) {
+        const now = Date.now();
+        const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+        const entriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${clickupId}`;
+
+        try {
+          const clickupRes = await axios.get(entriesUrl, {
+            headers: { Authorization: CLICKUP_TOKEN },
+            timeout: 5000
+          });
+
+          const timeEntries = clickupRes.data?.data || [];
+
+          const totalMilliseconds = timeEntries.reduce(
+            (sum, entry) => sum + (Number(entry.duration) || 0),
+            0
+          );
+          const totalSeconds = totalMilliseconds / 1000;
+          const totalMinutes = totalSeconds / 60;
+          const totalHours = totalMinutes / 60;
+          const worksDone = timeEntries.length;
+
+          const uniqueTaskIds = [
+            ...new Set(timeEntries.map((entry) => entry.task?.id || entry.task).filter(Boolean)),
+          ];
+
+          let tasksWithDetails = [];
+          if (uniqueTaskIds.length > 0) {
+            const tasksToFetch = uniqueTaskIds.slice(0, 15);
+            const taskPromises = tasksToFetch.map(async (taskId) => {
+              try {
+                const taskUrl = `https://api.clickup.com/api/v2/task/${taskId}`;
+                const tRes = await axios.get(taskUrl, {
+                  headers: { Authorization: CLICKUP_TOKEN },
+                  timeout: 3000
+                });
+                return {
+                  id: tRes.data.id,
+                  title: tRes.data.name,
+                  status: tRes.data.status?.status,
+                  statusColor: tRes.data.status?.color,
+                  description: tRes.data.description || "",
+                  due: tRes.data.due_date ? new Date(parseInt(tRes.data.due_date)).toLocaleDateString() : null,
+                  url: tRes.data.url
+                };
+              } catch (e) {
+                return null;
+              }
+            });
+            tasksWithDetails = (await Promise.all(taskPromises)).filter(Boolean);
+          }
+
+          clickupPayload = {
+            assignee: clickupId,
+            worksDone,
+            totalMilliseconds,
+            totalSeconds,
+            totalMinutes,
+            totalHours,
+            uniqueTaskIds,
+            tasksCount: uniqueTaskIds.length,
+            tasks: tasksWithDetails
+          };
+        } catch (clickupErr) {
+          console.error(`ClickUp API Error for member ${slug}:`, clickupErr.message);
+          clickupPayload = { error: "ClickUp service temporarily unavailable" };
+        }
+      }
+
+      return res.json({ member, clickup: clickupPayload });
     } catch (err) {
       console.error(err);
       return res.status(500).json({ message: "Internal server error", error: err.message });

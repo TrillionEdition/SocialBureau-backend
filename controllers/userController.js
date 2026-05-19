@@ -323,6 +323,7 @@ const userController = {
         email: userCreated.email, 
         name: userCreated.name,
         role: userCreated.role,
+        isEmployee: userCreated.isEmployee,
       },
     });
   }),
@@ -360,13 +361,15 @@ const userController = {
     }
 
     // 🔐 ROLE & VERIFICATION CHECK - Fixed logic
-    const isEmployee = userExist.role === "employee";
+    console.log("Login User:", { id: userExist._id, role: userExist.role, isEmployee: userExist.isEmployee });
+    const isEmployee = Boolean(userExist.isEmployee);
     const isVerified = userExist.verification === true; // Boolean comparison only
 
     const payload = {
       id: userExist._id.toString(),
       name: userExist.name,
       email: userExist.email,
+      name: userExist.name,
       role: userExist.role,
       verification: !!userExist.verification,
     };
@@ -397,6 +400,7 @@ const userController = {
         clickupChatViewId: userExist.clickupChatViewId,
         isEmployee,
         isVerified,
+        hasPaidInfluencer: userExist.hasPaidInfluencer,
       },
     });
   }),
@@ -837,9 +841,38 @@ const userController = {
       user.exp = req.body.exp || user.exp;
       user.doj = req.body.doj || user.doj;
       user.emp_id = req.body.emp_id || user.emp_id;
+<<<<<<< HEAD
       user.clickupId = req.body.clickupId || user.clickupId;
       user.clickupListId = req.body.clickupListId || user.clickupListId;
       user.clickupChatViewId = req.body.clickupChatViewId || user.clickupChatViewId;
+=======
+      // Team Page Details
+      user.bgColor = req.body.bgColor || user.bgColor;
+      
+      if (req.body.category) {
+        try {
+          user.category = typeof req.body.category === 'string' ? JSON.parse(req.body.category) : req.body.category;
+        } catch (e) {
+          user.category = req.body.category;
+        }
+      }
+      
+      if (req.body.tags) {
+        try {
+          user.tags = typeof req.body.tags === 'string' ? JSON.parse(req.body.tags) : req.body.tags;
+        } catch (e) {
+          user.tags = req.body.tags;
+        }
+      }
+      
+      if (req.body.socials) {
+        try {
+          user.socials = typeof req.body.socials === 'string' ? JSON.parse(req.body.socials) : req.body.socials;
+        } catch (e) {
+          user.socials = req.body.socials;
+        }
+      }
+>>>>>>> 96385c461d0bbf70c26224e3ee74909b23d1b677
 
       // if (req.body.isEmployee !== undefined) {
       //   user.isEmployee = req.body.isEmployee;
@@ -965,9 +998,8 @@ const userController = {
 
 
       // Handle file uploads
-      const coverFile = req.files?.coverImage?.[0];
-      const idCardFile = req.files?.idCard?.[0];
-      const avatarFile = req.files?.avatar?.[0]; // New
+      const avatarFile = req.files?.avatar?.[0]; 
+      const cardImageFile = req.files?.cardImage?.[0]; 
 
       if (coverFile) {
         user.coverImage = getUrlFromFile(coverFile);

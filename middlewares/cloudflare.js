@@ -44,16 +44,23 @@ const multerInstance = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
 
-async function uploadToR2(file, folder = 'images') {
+async function uploadToR2(file, folderOrReq = 'images') {
   const ext = path.extname(file.originalname) || '.jpg';
   const uuid = crypto.randomUUID();
 
   const rawPublicUrl = process.env.R2_PUBLIC_URL || '';
   const publicUrl = ensureHttps(rawPublicUrl).replace(/\/$/, '');
   const bucket = process.env.R2_BUCKET || '';
+  // Determine the folder name dynamically (supports either request object or string)
+  let folderName = 'images';
+  if (folderOrReq && typeof folderOrReq === 'object') {
+    folderName = folderOrReq.uploadFolder || 'images';
+  } else if (typeof folderOrReq === 'string') {
+    folderName = folderOrReq;
+  }
 
   // Clean folder path: remove leading/trailing slashes
-  let cleanFolder = folder.replace(/^\/+|\/+$/g, '');
+  let cleanFolder = folderName.replace(/^\/+|\/+$/g, '');
   
   // If the folder starts with the bucket name followed by a slash, strip it
   if (cleanFolder === bucket) {
@@ -63,7 +70,6 @@ async function uploadToR2(file, folder = 'images') {
   }
 
   const key = cleanFolder ? `${cleanFolder}/${uuid}${ext}` : `${uuid}${ext}`;
-
   await r2.send(new PutObjectCommand({
     Bucket: bucket,
     Key: key,
@@ -120,13 +126,13 @@ function wrapUpload(multerMiddleware, folder) {
       if (err) return next(err);
       try {
         if (req.file) {
-          await uploadToR2(req.file, folder);
+          await uploadToR2(req.file, folder || req);
         }
         if (req.files) {
           const files = Array.isArray(req.files)
             ? req.files
             : Object.values(req.files).flat();
-          await Promise.all(files.map(f => uploadToR2(f, folder)));
+          await Promise.all(files.map(f => uploadToR2(f, folder || req)));
         }
         next();
       } catch (uploadErr) {
