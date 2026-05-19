@@ -8,17 +8,52 @@ const { getCache, setCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
 const FormData = require('form-data');
 const fs = require('fs');
 
+const { AsyncLocalStorage } = require('async_hooks');
+const clickupStorage = new AsyncLocalStorage();
+
 const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 const TEAM_ID = "9014733918";
 const LIST_ID = process.env.CLICKUP_NEW_LIST_ID || process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
 
+// Axios request interceptor to dynamically set authorization token
+axios.interceptors.request.use((config) => {
+  const store = clickupStorage.getStore();
+  if (store && store.clickupToken && config.url && config.url.includes('api.clickup.com')) {
+    const hasAuthHeader = config.headers && (config.headers.Authorization || config.headers.authorization);
+    if (!hasAuthHeader) {
+      config.headers = Object.assign({}, config.headers || {}, { Authorization: store.clickupToken });
+    }
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
 // Helper to get user's ClickUp configuration
-const getUserConfig = async (userId) => {
-  const user = await User.findById(userId);
+const getUserConfig = async (userId, viewId = null) => {
+  let user = await User.findById(userId);
+
+  if (user && user.role === 'admin') {
+    // If the logged-in user is an admin, find the client who owns this viewId or listId
+    let client = null;
+    if (viewId && viewId !== 'current' && viewId !== 'undefined' && viewId !== 'null') {
+      client = await User.findOne({
+        $or: [
+          { clickupChatViewId: viewId },
+          { clickupListId: viewId }
+        ]
+      });
+    }
+    if (client) {
+      user = client;
+    }
+  }
+
   return {
     listId: user?.clickupListId || LIST_ID,
     chatViewId: user?.clickupChatViewId || null,
     clickupId: user?.clickupId || null,
+    clickupToken: (user?.clickupToken && user.clickupToken.trim()) ? user.clickupToken.trim() : CLICKUP_TOKEN,
     teamId: TEAM_ID // Assuming same team for now, can be expanded
   };
 };
@@ -31,12 +66,13 @@ function escapeRegex(text) {
 }
 
 // Helper to get or create a host task for view attachments
-const getOrCreateHostTask = async (listId) => {
+const getOrCreateHostTask = async (listId, token) => {
+  const activeToken = token || CLICKUP_TOKEN;
   try {
     // 1. Search for existing "Channel Media Host" task
     const searchUrl = `https://api.clickup.com/api/v2/list/${listId}/task?custom_task_ids=true&include_subtasks=true`;
     const response = await axios.get(searchUrl, {
-      headers: { Authorization: CLICKUP_TOKEN }
+      headers: { Authorization: activeToken }
     });
 
     const existingHost = response.data.tasks.find(t => t.name === "Channel Media Host");
@@ -49,7 +85,7 @@ const getOrCreateHostTask = async (listId) => {
       description: "This task holds attachments sent via the Client Portal Chat View.",
       status: "to do"
     }, {
-      headers: { Authorization: CLICKUP_TOKEN }
+      headers: { Authorization: activeToken }
     });
 
     return createRes.data.id;
@@ -59,7 +95,7 @@ const getOrCreateHostTask = async (listId) => {
     try {
       const fallbackUrl = `https://api.clickup.com/api/v2/list/${listId}/task`;
       const fallbackRes = await axios.get(fallbackUrl, {
-        headers: { Authorization: CLICKUP_TOKEN }
+        headers: { Authorization: activeToken }
       });
       if (fallbackRes.data.tasks.length > 0) return fallbackRes.data.tasks[0].id;
     } catch (e) {}
@@ -74,9 +110,30 @@ const clickupController = {
       const url = `https://api.clickup.com/api/v2/task/${taskId}`;
       console.log(`🔗 Fetching ClickUp Task [${taskId}]`);
 
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      const config = await getUserConfig(req.user.id, taskId);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
+
+      let response = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch task details with custom token...`);
+          response = await axios.get(url, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token task details fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token task fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!response) {
+        console.log(`🔄 Fetching task details using global token...`);
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
 
       // Map to our standard task format
       const task = response.data;
@@ -174,11 +231,17 @@ const clickupController = {
   uploadAttachment: expressAsyncHandler(async (req, res) => {
     try {
       let { viewId } = req.params;
-      const config = await getUserConfig(req.user.id);
+      const config = await getUserConfig(req.user.id, viewId);
+      // Allow frontend to force a per-request token via header or body
+      const overrideToken = req.headers['x-clickup-token'] || req.body?.clickupToken;
+      if (overrideToken && String(overrideToken).trim()) {
+        config.clickupToken = String(overrideToken).trim();
+      }
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
       
       // If viewId is a placeholder or not provided, use user's config
       if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
-        viewId = config.chatViewId;
+        viewId = config.chatViewId || "8cn3v2y-28474";
       }
 
       if (!viewId) {
@@ -209,7 +272,7 @@ const clickupController = {
           return res.status(400).json({ success: false, message: "No List ID configured to host view attachments" });
         }
         
-        targetTaskId = await getOrCreateHostTask(config.listId);
+        targetTaskId = await getOrCreateHostTask(config.listId, config.clickupToken);
         console.log(`🎯 Using Host Task: ${targetTaskId}`);
       }
 
@@ -222,12 +285,33 @@ const clickupController = {
         contentType: req.file.mimetype,
       });
 
-      const response = await axios.post(url, form, {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: CLICKUP_TOKEN,
-        },
-      });
+      let response;
+      const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
+
+      if (hasCustomToken) {
+        try {
+          console.log("🔄 Attempting file upload using custom client token...");
+          response = await axios.post(url, form, {
+            headers: {
+              ...form.getHeaders(),
+              Authorization: config.clickupToken,
+            },
+          });
+          console.log("✅ File upload using custom token successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token upload failed, falling back to global token...", err.response?.data || err.message);
+        }
+      }
+
+      if (!response) {
+        console.log("🔄 Uploading file using global token...");
+        response = await axios.post(url, form, {
+          headers: {
+            ...form.getHeaders(),
+            Authorization: CLICKUP_TOKEN,
+          },
+        });
+      }
 
       console.log("✅ ClickUp Upload Success:", response.data);
 
@@ -247,8 +331,8 @@ const clickupController = {
 
         console.log(`📝 Auto-posting native rich attachment comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
 
-        // Format a clean, attributed sender tag
-        const senderTag = `[Sent by ${senderName}]: `;
+        // Format a clean, attributed sender tag only if using global token
+        const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
 
         let commentBody = {};
 
@@ -257,7 +341,7 @@ const clickupController = {
           commentBody = {
             comment: [
               {
-                text: senderTag
+                text: ""
               },
               {
                 type: "image",
@@ -290,7 +374,7 @@ const clickupController = {
           commentBody = {
             comment: [
               {
-                text: senderTag
+                text: ""
               },
               {
                 type: "attachment",
@@ -318,13 +402,33 @@ const clickupController = {
           };
         }
 
-        await axios.post(commentUrl, commentBody, {
-          headers: {
-            Authorization: CLICKUP_TOKEN,
-            'Content-Type': 'application/json'
-          },
-        });
-        console.log("✅ Auto-posted native rich attachment comment successfully!");
+        let commentRes = null;
+        if (hasCustomToken) {
+          try {
+            console.log("🔄 Auto-posting comment using custom client token...");
+            commentRes = await axios.post(commentUrl, commentBody, {
+              headers: {
+                Authorization: config.clickupToken,
+                'Content-Type': 'application/json'
+              },
+            });
+            console.log("✅ Auto-posted rich attachment comment successfully using custom token!");
+          } catch (err) {
+            console.error("⚠️ Custom token auto-post failed, falling back to global token...", err.response?.data || err.message);
+          }
+        }
+
+        if (!commentRes) {
+          console.log("🔄 Auto-posting comment using global token...");
+          
+          await axios.post(commentUrl, commentBody, {
+            headers: {
+              Authorization: CLICKUP_TOKEN,
+              'Content-Type': 'application/json'
+            },
+          });
+          console.log("✅ Auto-posted rich attachment comment successfully using global token!");
+        }
       } catch (commentErr) {
         console.error("⚠️ Failed to auto-post rich attachment comment:", commentErr.response?.data || commentErr.message);
       }
@@ -367,11 +471,32 @@ const clickupController = {
       const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
       const user_id = 88409188;
       const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${user_id}`;
-      const clickupRes = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
-      const worksDone = clickupRes.data.data.length;
+      const config = await getUserConfig(req.user.id);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
+      let clickupRes = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch time entries with custom token...`);
+          clickupRes = await axios.get(url, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token time entries fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token time entries fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!clickupRes) {
+        console.log(`🔄 Fetching time entries using global token...`);
+        clickupRes = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
+
+      const worksDone = clickupRes.data.data.length;
       const user = clickupRes.data.data[0]?.user;
       const timeEntries = clickupRes.data.data || [];
       const totalMilliseconds = timeEntries.reduce(
@@ -387,6 +512,7 @@ const clickupController = {
         worksDone,
       });
     } catch (e) {
+      console.error("❌ ClickUp Time Fetch Error:", e.response?.data || e.message);
       res.status(500).json({ error: e.message });
     }
   }),
@@ -394,16 +520,20 @@ const clickupController = {
   testClickUp: expressAsyncHandler(async (req, res) => {
     try {
       console.log("🧪 Testing ClickUp Connection...");
-      console.log("Token:", CLICKUP_TOKEN ? "✓ Present" : "✗ Missing");
-      console.log("LIST_ID:", LIST_ID);
+      const config = await getUserConfig(req.user.id);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
+      const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      const activeListId = config.listId || LIST_ID;
+      console.log("Token:", activeToken ? "✓ Present" : "✗ Missing");
+      console.log("LIST_ID:", activeListId);
       console.log("TEAM_ID:", TEAM_ID);
 
       // Test 1: Get list info
-      const listUrl = `https://api.clickup.com/api/v2/list/${LIST_ID}`;
+      const listUrl = `https://api.clickup.com/api/v2/list/${activeListId}`;
       console.log("Testing URL:", listUrl);
 
       const listResponse = await axios.get(listUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
+        headers: { Authorization: activeToken },
         timeout: 5000
       });
 
@@ -422,19 +552,22 @@ const clickupController = {
           space_id: listResponse.data.space?.id
         },
         config: {
-          token: CLICKUP_TOKEN ? "✓ Present" : "✗ Missing",
-          listId: LIST_ID,
+          token: activeToken ? "✓ Present" : "✗ Missing",
+          listId: activeListId,
           teamId: TEAM_ID
         }
       });
     } catch (error) {
       console.error("❌ Test Error:", error.response?.data || error.message);
+      const config = await getUserConfig(req.user.id).catch(() => ({}));
+      const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      const activeListId = config.listId || LIST_ID;
       res.status(500).json({
         success: false,
         error: error.response?.data || error.message,
         config: {
-          token: CLICKUP_TOKEN ? "✓ Present" : "✗ Missing",
-          listId: LIST_ID,
+          token: activeToken ? "✓ Present" : "✗ Missing",
+          listId: activeListId,
           teamId: TEAM_ID
         }
       });
@@ -443,26 +576,133 @@ const clickupController = {
     }
   }),
 
+  // Start OAuth: return a ClickUp authorization URL the frontend can redirect the user to
+  startOAuth: expressAsyncHandler(async (req, res) => {
+    try {
+      const clientId = process.env.VITE_CLICKUP_CLIENT_ID || process.env.CLICKUP_CLIENT_ID;
+      const redirectBase = process.env.CLICKUP_OAUTH_REDIRECT || process.env.BASE_URL || `http://localhost:3000`;
+      // The backend callback endpoint
+      const callbackUrl = `${redirectBase.replace(/\/$/, '')}/clickup/oauth/callback`;
+
+      if (!clientId) {
+        return res.status(500).json({ success: false, message: 'ClickUp client ID not configured on server' });
+      }
+
+      // Return the URL for the frontend to redirect the user to (keeps flexibility for frontend)
+      const authUrl = `https://app.clickup.com/api?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
+      return res.json({ success: true, url: authUrl });
+    } catch (err) {
+      console.error('❌ startOAuth error:', err.message || err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }),
+
+  // OAuth callback: exchange code for token and save to user
+  handleOAuthCallback: expressAsyncHandler(async (req, res) => {
+    try {
+      const code = req.query.code;
+      if (!code) return res.status(400).json({ success: false, message: 'Missing code' });
+
+      const clientId = process.env.VITE_CLICKUP_CLIENT_ID || process.env.CLICKUP_CLIENT_ID;
+      const clientSecret = process.env.VITE_CLICKUP_CLIENT_SECRET || process.env.CLICKUP_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        return res.status(500).json({ success: false, message: 'ClickUp client credentials not configured' });
+      }
+
+      // Exchange code for token
+      const tokenRes = await axios.post('https://api.clickup.com/api/v2/oauth/token', null, {
+        params: {
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+        }
+      });
+
+      const accessToken = tokenRes.data?.access_token || tokenRes.data?.token || tokenRes.data?.accessToken || null;
+      if (!accessToken) {
+        console.error('❌ No access token returned:', tokenRes.data);
+        return res.status(500).json({ success: false, message: 'Failed to obtain ClickUp access token', details: tokenRes.data });
+      }
+
+      // Fetch ClickUp user profile to get their ClickUp user id
+      const profileRes = await axios.get('https://api.clickup.com/api/v2/user', {
+        headers: { Authorization: accessToken }
+      }).catch(e => null);
+
+      const clickupUserId = profileRes?.data?.user?.id || null;
+
+      // Save token & clickupId on the logged-in user
+      const userId = req.user?.id || req.user?._id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'User not authenticated' });
+      }
+
+      const update = { clickupToken: accessToken };
+      if (clickupUserId) update.clickupId = String(clickupUserId);
+
+      await User.findByIdAndUpdate(userId, update, { new: true });
+
+      // Redirect or respond success
+      // If called via browser redirect, provide a simple page
+      if (req.headers.accept && req.headers.accept.includes('text/html')) {
+        return res.send(`<html><body><script>window.opener && window.opener.postMessage({ type: 'CLICKUP_CONNECTED' }, '*'); window.close();</script><p>ClickUp connected. You can close this window.</p></body></html>`);
+      }
+
+      res.json({ success: true, message: 'ClickUp account connected', clickupUserId });
+    } catch (err) {
+      console.error('❌ OAuth callback error:', err.response?.data || err.message || err);
+      res.status(500).json({ success: false, error: err.response?.data || err.message });
+    }
+  }),
+
   getTasks: expressAsyncHandler(async (req, res) => {
     try {
       const config = await getUserConfig(req.user.id);
       const userListId = config.listId;
 
-      // 1. Fetch List Details to get ALL possible statuses
-      const listUrl = `https://api.clickup.com/api/v2/list/${userListId}`;
-      const listRes = await axios.get(listUrl, { headers: { Authorization: CLICKUP_TOKEN } });
-      const allStatuses = listRes.data.statuses || [];
+      let listRes = null;
+      let response = null;
+      const customToken = config.clickupToken;
 
-      // 2. Fetch Tasks - Filter by assignee if clickupId is set
-      let url = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true`;
-      if (config.clickupId) {
-        url += `&assignees[]=${config.clickupId}`;
+      // Try with custom token first
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch list details and tasks with custom token...`);
+          listRes = await axios.get(`https://api.clickup.com/api/v2/list/${userListId}`, {
+            headers: { Authorization: customToken }
+          });
+          
+          let url = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true`;
+          if (config.clickupId) {
+            url += `&assignees[]=${config.clickupId}`;
+          }
+          response = await axios.get(url, {
+            headers: { Authorization: customToken }
+          });
+          console.log("✅ Custom token tasks fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token tasks fetch failed, falling back to global token...", err.message);
+        }
       }
-      console.log(`🔗 Fetching from List [${userListId}] (Filtered: ${!!config.clickupId}):`, url);
 
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      // Fallback to global token
+      if (!listRes || !response) {
+        console.log(`🔄 Fetching list details and tasks using global token...`);
+        listRes = await axios.get(`https://api.clickup.com/api/v2/list/${userListId}`, {
+          headers: { Authorization: CLICKUP_TOKEN }
+        });
+        
+        let url = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true`;
+        if (config.clickupId) {
+          url += `&assignees[]=${config.clickupId}`;
+        }
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN }
+        });
+      }
+
+      const allStatuses = listRes.data.statuses || [];
 
 
       const tasks = response.data.tasks.map(task => ({
@@ -565,26 +805,44 @@ const clickupController = {
       if (!taskId) return res.status(400).json({ message: "Task ID is required" });
 
       console.log(`🔗 Fetching Activity for Task [${taskId}]`);
+      const config = await getUserConfig(req.user.id, taskId);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
-      // 1. Fetch Full Task Details (includes attachments)
-      const taskUrl = `https://api.clickup.com/api/v2/task/${taskId}`;
-      const taskRes = await axios.get(taskUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      let taskRes = null;
+      let timeEntriesRes = null;
+      let commentsRes = null;
+      const customToken = config.clickupToken;
 
-      // 2. Fetch Time Entries (Team level but filtered by task)
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch task activity with custom token...`);
+          taskRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
+            headers: { Authorization: customToken },
+          });
+          timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`, {
+            headers: { Authorization: customToken },
+          });
+          commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token task activity fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token task activity fetch failed, falling back to global token...", err.message);
+        }
+      }
 
-      // Note: We need the team_id. Using the one from config.
-      const timeEntriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`;
-      const timeEntriesRes = await axios.get(timeEntriesUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
-
-      // 3. Fetch Comments (optional but good for 'everything thya done')
-      const commentsUrl = `https://api.clickup.com/api/v2/task/${taskId}/comment`;
-      const commentsRes = await axios.get(commentsUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      if (!taskRes || !timeEntriesRes || !commentsRes) {
+        console.log(`🔄 Fetching task activity using global token...`);
+        taskRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+        timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+        commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
 
       res.json({
         success: true,
@@ -706,10 +964,29 @@ const clickupController = {
         const entriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${clickupId}`;
 
         try {
-          const clickupRes = await axios.get(entriesUrl, {
-            headers: { Authorization: CLICKUP_TOKEN },
-            timeout: 5000 // Add timeout to prevent hanging
-          });
+          let clickupRes = null;
+          const customToken = (user.clickupToken && user.clickupToken.trim()) ? user.clickupToken.trim() : null;
+
+          if (customToken && customToken !== CLICKUP_TOKEN) {
+            try {
+              console.log(`🔄 Attempting to fetch user time entries with custom token...`);
+              clickupRes = await axios.get(entriesUrl, {
+                headers: { Authorization: customToken },
+                timeout: 5000
+              });
+              console.log("✅ Custom token user time entries fetch successful!");
+            } catch (err) {
+              console.error("⚠️ Custom token user time entries fetch failed, falling back to global token...", err.message);
+            }
+          }
+
+          if (!clickupRes) {
+            console.log(`🔄 Fetching user time entries using global token...`);
+            clickupRes = await axios.get(entriesUrl, {
+              headers: { Authorization: CLICKUP_TOKEN },
+              timeout: 5000
+            });
+          }
 
           const timeEntries = clickupRes.data?.data || [];
 
@@ -816,10 +1093,29 @@ const clickupController = {
         const entriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${clickupId}`;
 
         try {
-          const clickupRes = await axios.get(entriesUrl, {
-            headers: { Authorization: CLICKUP_TOKEN },
-            timeout: 5000
-          });
+          let clickupRes = null;
+          const customToken = member.user?.clickupToken;
+
+          if (customToken && customToken !== CLICKUP_TOKEN) {
+            try {
+              console.log(`🔄 Attempting to fetch member time entries with custom token...`);
+              clickupRes = await axios.get(entriesUrl, {
+                headers: { Authorization: customToken },
+                timeout: 5000
+              });
+              console.log("✅ Custom token member time entries fetch successful!");
+            } catch (err) {
+              console.error("⚠️ Custom token member time entries fetch failed, falling back to global token...", err.message);
+            }
+          }
+
+          if (!clickupRes) {
+            console.log(`🔄 Fetching member time entries using global token...`);
+            clickupRes = await axios.get(entriesUrl, {
+              headers: { Authorization: CLICKUP_TOKEN },
+              timeout: 5000
+            });
+          }
 
           const timeEntries = clickupRes.data?.data || [];
 
@@ -842,8 +1138,9 @@ const clickupController = {
             const taskPromises = tasksToFetch.map(async (taskId) => {
               try {
                 const taskUrl = `https://api.clickup.com/api/v2/task/${taskId}`;
+                const tokenToUse = customToken && customToken !== CLICKUP_TOKEN ? customToken : CLICKUP_TOKEN;
                 const tRes = await axios.get(taskUrl, {
-                  headers: { Authorization: CLICKUP_TOKEN },
+                  headers: { Authorization: tokenToUse },
                   timeout: 3000
                 });
                 return {
@@ -931,12 +1228,12 @@ const clickupController = {
       const url = `https://api.clickup.com/api/v2/list/${userListId}/task`;
       console.log("📋 POST URL:", url);
 
-
-      console.log("📋 Authorization Header Length:", CLICKUP_TOKEN?.length);
+      const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      console.log("📋 Authorization Header Length:", activeToken?.length);
 
       const response = await axios.post(url, taskPayload, {
         headers: {
-          Authorization: CLICKUP_TOKEN,
+          Authorization: activeToken,
           "Content-Type": "application/json"
         },
         timeout: 10000
@@ -986,10 +1283,11 @@ const clickupController = {
   getChatComments: expressAsyncHandler(async (req, res) => {
     try {
       let { viewId } = req.params;
-      const config = await getUserConfig(req.user.id);
+      const config = await getUserConfig(req.user.id, viewId);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
       if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
-        viewId = config.chatViewId;
+        viewId = config.chatViewId || "8cn3v2y-28474";
       }
 
       if (!viewId) {
@@ -1004,9 +1302,27 @@ const clickupController = {
 
       console.log(`🔗 Fetching Chat Comments from ${isView ? 'View' : 'Task'} [${viewId}]`);
 
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      let response = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log("🔄 Attempting to fetch chat comments with custom token...");
+          response = await axios.get(url, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token chat comments fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token comments fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!response) {
+        console.log("🔄 Fetching chat comments using global token...");
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
 
       res.json({
         success: true,
@@ -1014,7 +1330,7 @@ const clickupController = {
       });
     } catch (error) {
       console.error("❌ ClickUp API Error (getChatComments):", error.response?.data || error.message);
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
+      res.json({ success: false, comments: [], error: error.response?.data || error.message });
     }
   }),
 
@@ -1022,10 +1338,17 @@ const clickupController = {
     try {
       let { viewId } = req.params;
       const { comment_text } = req.body;
-      const config = await getUserConfig(req.user.id);
+      const config = await getUserConfig(req.user.id, viewId);      
+      
+      // Allow frontend to force a per-request token via header or body
+      const overrideToken = req.headers['x-clickup-token'] || req.body?.clickupToken;
+      if (overrideToken && String(overrideToken).trim()) {
+        config.clickupToken = String(overrideToken).trim();
+      }
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
       if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
-        viewId = config.chatViewId;
+        viewId = config.chatViewId || "8cn3v2y-28474";
       }
 
       if (!viewId) {
@@ -1041,10 +1364,33 @@ const clickupController = {
       console.log(`📝 Posting Comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
 
       const senderName = req.user.name || "Client";
-      const attributionText = `[Sent by ${senderName}]: ${comment_text}`;
+      const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
 
+      if (hasCustomToken) {
+        try {
+          console.log("🔄 Attempting to post comment using custom client token...");
+          const response = await axios.post(url, {
+            comment_text: comment_text,
+            notify_all: true
+          }, {
+            headers: {
+              Authorization: config.clickupToken,
+              'Content-Type': 'application/json'
+            },
+          });
+          console.log("✅ Successfully posted comment using custom client token!");
+          return res.json({
+            success: true,
+            comment: response.data
+          });
+        } catch (err) {
+}
+      }
+
+      console.log("🔄 Posting comment using global token with sender prefix...");
+      const commentTextToSend = `${comment_text}`;
       const response = await axios.post(url, {
-        comment_text: attributionText,
+        comment_text: commentTextToSend,
         notify_all: true
       }, {
         headers: {
@@ -1057,37 +1403,59 @@ const clickupController = {
         success: true,
         comment: response.data
       });
-    } catch (error) {
-      console.error("❌ ClickUp API Error (postChatComment):", error.response?.data || error.message);
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
-    }
+    } catch (err) {
+          console.error("⚠️ Custom token post failed, falling back to global token...", err.response?.data || err.message);
+        }
   }),
 
   getGeneralActivity: expressAsyncHandler(async (req, res) => {
     try {
       const config = await getUserConfig(req.user.id);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
       const userListId = config.listId;
 
       console.log(`🔗 Fetching Combined Task Log & Activity for List [${userListId}]`);
       
-      // 0. Dynamically find the Team ID (Workspace) to avoid 404s
+      // 0. Dynamically find the Team ID (Workspace) to avoid 404s and fetch tasks
       let dynamicTeamId = TEAM_ID;
-      try {
-        const teamRes = await axios.get('https://api.clickup.com/api/v2/team', { 
-          headers: { Authorization: CLICKUP_TOKEN },
-          timeout: 5000
-        });
-        if (teamRes.data.teams?.length > 0) {
-          dynamicTeamId = teamRes.data.teams[0].id;
-          console.log(`✅ Using Workspace ID: ${dynamicTeamId}`);
+      let tasksRes = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting general activity fetch with custom token...`);
+          const teamRes = await axios.get('https://api.clickup.com/api/v2/team', { 
+            headers: { Authorization: customToken },
+            timeout: 5000
+          });
+          if (teamRes.data.teams?.length > 0) {
+            dynamicTeamId = teamRes.data.teams[0].id;
+          }
+          const tasksUrl = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true&subtasks=true&limit=60`;
+          tasksRes = await axios.get(tasksUrl, { headers: { Authorization: customToken } });
+          console.log("✅ Custom token general activity fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token activity fetch failed, falling back to global token...", err.message);
         }
-      } catch (err) {
-        console.warn("⚠️ Failed to fetch dynamic Team ID, falling back to hardcoded ID.");
       }
 
-      // 1. Fetch ALL Tasks (Base Log)
-      const tasksUrl = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true&subtasks=true&limit=60`;
-      const tasksRes = await axios.get(tasksUrl, { headers: { Authorization: CLICKUP_TOKEN } });
+      if (!tasksRes) {
+        console.log(`🔄 Fetching general activity using global token...`);
+        try {
+          const teamRes = await axios.get('https://api.clickup.com/api/v2/team', { 
+            headers: { Authorization: CLICKUP_TOKEN },
+            timeout: 5000
+          });
+          if (teamRes.data.teams?.length > 0) {
+            dynamicTeamId = teamRes.data.teams[0].id;
+          }
+        } catch (err) {
+          console.warn("⚠️ Failed to fetch dynamic Team ID with global token.");
+        }
+        const tasksUrl = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true&subtasks=true&limit=60`;
+        tasksRes = await axios.get(tasksUrl, { headers: { Authorization: CLICKUP_TOKEN } });
+      }
+
       const tasks = tasksRes.data.tasks || [];
 
       let mergedActivity = [];
@@ -1174,10 +1542,28 @@ const clickupController = {
       // 3. Layer in Recent Team Activity (Live Events)
       try {
         const activityUrl = `https://api.clickup.com/api/v2/team/${dynamicTeamId}/activity?list_ids[]=${userListId}&limit=100`;
-        const activityRes = await axios.get(activityUrl, { 
-          headers: { Authorization: CLICKUP_TOKEN },
-          timeout: 8000
-        });
+        let activityRes = null;
+
+        if (customToken && customToken !== CLICKUP_TOKEN) {
+          try {
+            console.log(`🔄 Attempting general activity with custom token...`);
+            activityRes = await axios.get(activityUrl, { 
+              headers: { Authorization: customToken },
+              timeout: 8000
+            });
+            console.log("✅ Custom token general activity fetch successful!");
+          } catch (err) {
+            console.error("⚠️ Custom token activity fetch failed, falling back to global token...", err.message);
+          }
+        }
+
+        if (!activityRes) {
+          console.log(`🔄 Fetching general activity using global token...`);
+          activityRes = await axios.get(activityUrl, { 
+            headers: { Authorization: CLICKUP_TOKEN },
+            timeout: 8000
+          });
+        }
         
         const rawActivities = activityRes.data.activities || [];
 
@@ -1262,17 +1648,41 @@ const clickupController = {
 
 };
 
-module.exports = clickupController;
+module.exports = {
+  ...clickupController,
+  getUserConfig,
+  clickupStorage
+};
 
 // --- helper functions kept for other endpoints ---
 
-async function getWorkedTasksLast30Days() {
+async function getWorkedTasksLast30Days(config = null) {
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
   const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}`;
-  const clickupRes = await axios.get(url, {
-    headers: { Authorization: CLICKUP_TOKEN },
-  });
+  
+  let clickupRes = null;
+  const customToken = config?.clickupToken;
+
+  if (customToken && customToken !== CLICKUP_TOKEN) {
+    try {
+      console.log(`🔄 Attempting to fetch worked tasks with custom token...`);
+      clickupRes = await axios.get(url, {
+        headers: { Authorization: customToken },
+      });
+      console.log("✅ Custom token worked tasks fetch successful!");
+    } catch (err) {
+      console.error("⚠️ Custom token worked tasks fetch failed, falling back to global token...", err.message);
+    }
+  }
+
+  if (!clickupRes) {
+    console.log(`🔄 Fetching worked tasks using global token...`);
+    clickupRes = await axios.get(url, {
+      headers: { Authorization: CLICKUP_TOKEN },
+    });
+  }
+
   const timeEntries = clickupRes.data.data || [];
   const uniqueTaskIds = [
     ...new Set(timeEntries.map((entry) => entry.task?.id || entry.task).filter(Boolean)),
@@ -1283,14 +1693,34 @@ async function getWorkedTasksLast30Days() {
   };
 }
 
-async function getTasksWorkedByMemberLast30Days() {
+async function getTasksWorkedByMemberLast30Days(config = null) {
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
   const user_id = 88409188;
   const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${user_id}`;
-  const clickupRes = await axios.get(url, {
-    headers: { Authorization: CLICKUP_TOKEN },
-  });
+  
+  let clickupRes = null;
+  const customToken = config?.clickupToken;
+
+  if (customToken && customToken !== CLICKUP_TOKEN) {
+    try {
+      console.log(`🔄 Attempting to fetch member tasks with custom token...`);
+      clickupRes = await axios.get(url, {
+        headers: { Authorization: customToken },
+      });
+      console.log("✅ Custom token member tasks fetch successful!");
+    } catch (err) {
+      console.error("⚠️ Custom token member tasks fetch failed, falling back to global token...", err.message);
+    }
+  }
+
+  if (!clickupRes) {
+    console.log(`🔄 Fetching member tasks using global token...`);
+    clickupRes = await axios.get(url, {
+      headers: { Authorization: CLICKUP_TOKEN },
+    });
+  }
+
   const timeEntries = clickupRes.data.data || [];
   const uniqueTaskIds = [
     ...new Set(timeEntries.map((entry) => entry.task?.id || entry.task).filter(Boolean)),

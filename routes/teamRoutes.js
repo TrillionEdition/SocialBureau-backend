@@ -394,7 +394,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       doj: doj ? new Date(doj) : undefined,
       role,
       isEmployee: isEmployee !== undefined ? isEmployee : true,
-      clickupId: clickupId ? Number(clickupId) : undefined,
+      clickupId: clickupId ? String(clickupId).trim() : undefined,
       rate: rate ? Number(rate) : undefined,
       coverImage: coverImage || undefined,
       idCard: idCard || undefined,

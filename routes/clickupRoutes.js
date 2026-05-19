@@ -5,36 +5,41 @@ const multer = require('multer');
 const upload = multer({ dest: 'uploads/' }); // Temporary storage before proxying to ClickUp
 
 
-<<<<<<< HEAD
 const userAuthentication = require("../middlewares/userAuthentication");
 
-clickupRoutes.get('/tasks', userAuthentication, clickupController.getTasks);
-clickupRoutes.get('/tasks/:taskId', userAuthentication, clickupController.getTaskById);
-clickupRoutes.get('/time', userAuthentication, clickupController.getTime);
-clickupRoutes.get('/user-task', userAuthentication, clickupController.getTasksById);
-clickupRoutes.get('/user-details', userAuthentication, clickupController.getUserDetails);
-clickupRoutes.get('/test', userAuthentication, clickupController.testClickUp);
-clickupRoutes.get('/tasks/:taskId/activity', userAuthentication, clickupController.getTaskActivity);
-clickupRoutes.post('/create-task', userAuthentication, clickupController.createTask);
-clickupRoutes.get('/chat-messages/:viewId', userAuthentication, clickupController.getChatComments);
-clickupRoutes.post('/chat-messages/:viewId', userAuthentication, clickupController.postChatComment);
-clickupRoutes.post('/chat-messages/:viewId/attachment', userAuthentication, upload.single('attachment'), clickupController.uploadAttachment);
-=======
-clickupRoutes.get('/tasks', clickupController.getTasks);
-clickupRoutes.get('/tasks/:taskId', clickupController.getTaskById);
-clickupRoutes.get('/time', clickupController.getTime);
-clickupRoutes.get('/user-task', clickupController.getTasksById);
-clickupRoutes.get('/user-details', clickupController.getUserDetails);
-clickupRoutes.get('/member-details', clickupController.getMemberDetails);
-clickupRoutes.get('/test', clickupController.testClickUp);
-clickupRoutes.get('/tasks/:taskId/activity', clickupController.getTaskActivity);
-clickupRoutes.post('/create-task', clickupController.createTask);
-clickupRoutes.get('/chat-messages/:viewId', clickupController.getChatComments);
-clickupRoutes.post('/chat-messages/:viewId', clickupController.postChatComment);
-clickupRoutes.post('/chat-messages/:viewId/attachment', upload.single('attachment'), clickupController.uploadAttachment);
->>>>>>> 96385c461d0bbf70c26224e3ee74909b23d1b677
+const { clickupStorage, getUserConfig } = clickupController;
+
+const clickupContext = async (req, res, next) => {
+  try {
+    const viewId = req.params?.viewId || req.query?.viewId || req.body?.viewId || req.params?.taskId;
+    const config = await getUserConfig(req.user?.id || req.user?._id, viewId);
+    clickupStorage.run(config, () => {
+      next();
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+const authWithContext = [userAuthentication, clickupContext];
+
+clickupRoutes.get('/tasks', authWithContext, clickupController.getTasks);
+clickupRoutes.get('/tasks/:taskId', authWithContext, clickupController.getTaskById);
+clickupRoutes.get('/time', authWithContext, clickupController.getTime);
+clickupRoutes.get('/user-task', authWithContext, clickupController.getTasksById);
+clickupRoutes.get('/user-details', authWithContext, clickupController.getUserDetails);
+clickupRoutes.get('/member-details', authWithContext, clickupController.getMemberDetails);
+clickupRoutes.get('/test', authWithContext, clickupController.testClickUp);
+// OAuth connect flow for ClickUp (start + callback)
+clickupRoutes.get('/oauth/start', userAuthentication, clickupController.startOAuth);
+clickupRoutes.get('/oauth/callback', userAuthentication, clickupController.handleOAuthCallback);
+clickupRoutes.get('/tasks/:taskId/activity', authWithContext, clickupController.getTaskActivity);
+clickupRoutes.post('/create-task', authWithContext, clickupController.createTask);
+clickupRoutes.get('/chat-messages/:viewId', authWithContext, clickupController.getChatComments);
+clickupRoutes.post('/chat-messages/:viewId', authWithContext, clickupController.postChatComment);
+clickupRoutes.post('/chat-messages/:viewId/attachment', authWithContext, upload.single('attachment'), clickupController.uploadAttachment);
 clickupRoutes.get('/image-proxy', clickupController.proxyClickUpImage);
-clickupRoutes.get('/general-activity', userAuthentication, clickupController.getGeneralActivity);
+clickupRoutes.get('/general-activity', authWithContext, clickupController.getGeneralActivity);
 
 
 

@@ -55,7 +55,7 @@ const userSchema = new mongoose.Schema(
 
     // ClickUp ID (optional). Indexed for fast lookup; make unique if your app requires one-to-one mapping.
     clickupId: {
-      type: Number,
+      type: String,
       index: true,
     },
 
@@ -67,6 +67,10 @@ const userSchema = new mongoose.Schema(
     clickupChatViewId: {
       type: String,
       index: true,
+    },
+
+    clickupToken: {
+      type: String,
     },
 
     // Multiple reviews authored/associated with this user
