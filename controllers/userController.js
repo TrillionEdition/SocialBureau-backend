@@ -841,11 +841,10 @@ const userController = {
       user.exp = req.body.exp || user.exp;
       user.doj = req.body.doj || user.doj;
       user.emp_id = req.body.emp_id || user.emp_id;
-<<<<<<< HEAD
       user.clickupId = req.body.clickupId || user.clickupId;
       user.clickupListId = req.body.clickupListId || user.clickupListId;
       user.clickupChatViewId = req.body.clickupChatViewId || user.clickupChatViewId;
-=======
+
       // Team Page Details
       user.bgColor = req.body.bgColor || user.bgColor;
       
@@ -872,7 +871,6 @@ const userController = {
           user.socials = req.body.socials;
         }
       }
->>>>>>> 96385c461d0bbf70c26224e3ee74909b23d1b677
 
       // if (req.body.isEmployee !== undefined) {
       //   user.isEmployee = req.body.isEmployee;
