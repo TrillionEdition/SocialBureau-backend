@@ -8,9 +8,55 @@ const { getCache, setCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
 const FormData = require('form-data');
 const fs = require('fs');
 
+const { AsyncLocalStorage } = require('async_hooks');
+const clickupStorage = new AsyncLocalStorage();
+
 const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 const TEAM_ID = "9014733918";
 const LIST_ID = process.env.CLICKUP_NEW_LIST_ID || process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
+
+// Axios request interceptor to dynamically set authorization token
+axios.interceptors.request.use((config) => {
+  const store = clickupStorage.getStore();
+  if (store && store.clickupToken && config.url && config.url.includes('api.clickup.com')) {
+    const hasAuthHeader = config.headers && (config.headers.Authorization || config.headers.authorization);
+    if (!hasAuthHeader) {
+      config.headers = Object.assign({}, config.headers || {}, { Authorization: store.clickupToken });
+    }
+  }
+  return config;
+}, (error) => {
+  return Promise.reject(error);
+});
+
+// Helper to get user's ClickUp configuration
+const getUserConfig = async (userId, viewId = null) => {
+  let user = await User.findById(userId);
+
+  if (user && user.role === 'admin') {
+    // If the logged-in user is an admin, find the client who owns this viewId or listId
+    let client = null;
+    if (viewId && viewId !== 'current' && viewId !== 'undefined' && viewId !== 'null') {
+      client = await User.findOne({
+        $or: [
+          { clickupChatViewId: viewId },
+          { clickupListId: viewId }
+        ]
+      });
+    }
+    if (client) {
+      user = client;
+    }
+  }
+
+  return {
+    listId: user?.clickupListId || LIST_ID,
+    chatViewId: user?.clickupChatViewId || null,
+    clickupId: user?.clickupId || null,
+    clickupToken: (user?.clickupToken && user.clickupToken.trim()) ? user.clickupToken.trim() : CLICKUP_TOKEN,
+    teamId: TEAM_ID // Assuming same team for now, can be expanded
+  };
+};
 
 
 
@@ -19,6 +65,44 @@ function escapeRegex(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Helper to get or create a host task for view attachments
+const getOrCreateHostTask = async (listId, token) => {
+  const activeToken = token || CLICKUP_TOKEN;
+  try {
+    // 1. Search for existing "Channel Media Host" task
+    const searchUrl = `https://api.clickup.com/api/v2/list/${listId}/task?custom_task_ids=true&include_subtasks=true`;
+    const response = await axios.get(searchUrl, {
+      headers: { Authorization: activeToken }
+    });
+
+    const existingHost = response.data.tasks.find(t => t.name === "Channel Media Host");
+    if (existingHost) return existingHost.id;
+
+    // 2. Create if not found
+    const createUrl = `https://api.clickup.com/api/v2/list/${listId}/task`;
+    const createRes = await axios.post(createUrl, {
+      name: "Channel Media Host",
+      description: "This task holds attachments sent via the Client Portal Chat View.",
+      status: "to do"
+    }, {
+      headers: { Authorization: activeToken }
+    });
+
+    return createRes.data.id;
+  } catch (error) {
+    console.error("❌ Error in getOrCreateHostTask:", error.response?.data || error.message);
+    // Fallback: just return the first task ID if any
+    try {
+      const fallbackUrl = `https://api.clickup.com/api/v2/list/${listId}/task`;
+      const fallbackRes = await axios.get(fallbackUrl, {
+        headers: { Authorization: activeToken }
+      });
+      if (fallbackRes.data.tasks.length > 0) return fallbackRes.data.tasks[0].id;
+    } catch (e) {}
+    throw new Error("Could not find or create a host task for attachments");
+  }
+};
+
 const clickupController = {
   getTaskById: expressAsyncHandler(async (req, res) => {
     try {
@@ -26,9 +110,30 @@ const clickupController = {
       const url = `https://api.clickup.com/api/v2/task/${taskId}`;
       console.log(`🔗 Fetching ClickUp Task [${taskId}]`);
 
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      const config = await getUserConfig(req.user.id, taskId);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
+
+      let response = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch task details with custom token...`);
+          response = await axios.get(url, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token task details fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token task fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!response) {
+        console.log(`🔄 Fetching task details using global token...`);
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
 
       // Map to our standard task format
       const task = response.data;
@@ -62,37 +167,90 @@ const clickupController = {
 
   proxyClickUpImage: expressAsyncHandler(async (req, res) => {
     try {
-      const { url } = req.query;
-      if (!url) return res.status(400).send("No URL provided");
-      
+      let targetUrl = req.query.url;
+      if (!targetUrl) return res.status(400).send("No URL provided");
+
       if (!CLICKUP_TOKEN) {
         console.error("❌ CLICKUP_TOKEN is missing in backend environment!");
         return res.status(500).send("Backend configuration error");
       }
 
-      console.log(`🖼️ Proxying image: ${url}`);
-      
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-        responseType: 'stream'
-      });
+      console.log(`🖼️ Proxying image: ${targetUrl}`);
 
-      // Forward headers
-      res.setHeader('Content-Type', response.headers['content-type']);
-      res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+      // Helper to determine if we should send the ClickUp token
+      const shouldSendToken = (url) => {
+        const isClickUpDomain = url.includes('clickup.com');
+        const isSigned = url.includes('X-Amz-Signature') || url.includes('AWSAccessKeyId') || url.includes('Expires=');
+        return isClickUpDomain && !isSigned;
+      };
 
-      response.data.pipe(res);
+      const fetchWithRedirects = async (url, depth = 0) => {
+        if (depth > 5) throw new Error("Too many redirects");
+
+        const headers = {};
+        if (shouldSendToken(url)) {
+          headers.Authorization = CLICKUP_TOKEN;
+        }
+
+        const response = await axios.get(url, {
+          headers,
+          responseType: 'stream',
+          maxRedirects: 0,
+          validateStatus: (status) => (status >= 200 && status < 400)
+        });
+
+        if (response.status >= 300 && response.status < 400 && response.headers.location) {
+          let nextUrl = response.headers.location;
+          // Handle relative redirects
+          if (nextUrl.startsWith('/')) {
+            const urlObj = new URL(url);
+            nextUrl = `${urlObj.protocol}//${urlObj.host}${nextUrl}`;
+          }
+          console.log(`↪️ [Depth ${depth}] Redirecting to: ${nextUrl}`);
+          return fetchWithRedirects(nextUrl, depth + 1);
+        }
+
+        return response;
+      };
+
+      const finalResponse = await fetchWithRedirects(targetUrl);
+
+      // Forward essential headers
+      if (finalResponse.headers['content-type']) {
+        res.setHeader('Content-Type', finalResponse.headers['content-type']);
+      }
+      res.setHeader('Cache-Control', 'public, max-age=3600'); 
+
+      finalResponse.data.pipe(res);
     } catch (error) {
       console.error("❌ Proxy Error:", error.message);
-      res.status(500).send("Error proxying image");
+      res.status(500).send(`Error proxying image: ${error.message}`);
     }
   }),
 
   uploadAttachment: expressAsyncHandler(async (req, res) => {
     try {
-      const { viewId } = req.params;
-      console.log(`📂 Upload request for View ID: ${viewId}`);
+      let { viewId } = req.params;
+      const config = await getUserConfig(req.user.id, viewId);
+      // Allow frontend to force a per-request token via header or body
+      const overrideToken = req.headers['x-clickup-token'] || req.body?.clickupToken;
+      if (overrideToken && String(overrideToken).trim()) {
+        config.clickupToken = String(overrideToken).trim();
+      }
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
       
+      // If viewId is a placeholder or not provided, use user's config
+      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
+        viewId = config.chatViewId || "8cn3v2y-28474";
+      }
+
+      if (!viewId) {
+        console.error("❌ Upload failed: No Chat View ID found");
+        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+      }
+
+      console.log(`📂 Upload request for View ID: ${viewId}`);
+
       if (!req.file) {
         console.error("❌ No file found in request");
         return res.status(400).json({ success: false, message: "No file uploaded" });
@@ -100,7 +258,25 @@ const clickupController = {
 
       console.log(`📄 File info: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
 
-      const url = `https://api.clickup.com/api/v2/view/${viewId}/attachment`;
+      console.log(`📄 File info: ${req.file.originalname} (${req.file.mimetype}, ${req.file.size} bytes)`);
+
+      // Intelligently decide which endpoint to use.
+      // ClickUp ONLY supports attachments on TASKS. 
+      const isView = viewId.includes('-');
+      let targetTaskId = viewId;
+      
+      if (isView) {
+        console.log(`⚠️ View ID detected [${viewId}]. Redirecting attachment to host task...`);
+        // If it's a view, we need to find or create a "Host Task" in the list to hold the attachment
+        if (!config.listId) {
+          return res.status(400).json({ success: false, message: "No List ID configured to host view attachments" });
+        }
+        
+        targetTaskId = await getOrCreateHostTask(config.listId, config.clickupToken);
+        console.log(`🎯 Using Host Task: ${targetTaskId}`);
+      }
+
+      const url = `https://api.clickup.com/api/v2/task/${targetTaskId}/attachment`;
       console.log(`📤 Sending to ClickUp: ${url}`);
 
       const form = new FormData();
@@ -109,27 +285,183 @@ const clickupController = {
         contentType: req.file.mimetype,
       });
 
-      const response = await axios.post(url, form, {
-        headers: {
-          ...form.getHeaders(),
-          Authorization: CLICKUP_TOKEN,
-        },
-      });
+      let response;
+      const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
+
+      if (hasCustomToken) {
+        try {
+          console.log("🔄 Attempting file upload using custom client token...");
+          response = await axios.post(url, form, {
+            headers: {
+              ...form.getHeaders(),
+              Authorization: config.clickupToken,
+            },
+          });
+          console.log("✅ File upload using custom token successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token upload failed, falling back to global token...", err.response?.data || err.message);
+        }
+      }
+
+      if (!response) {
+        console.log("🔄 Uploading file using global token...");
+        response = await axios.post(url, form, {
+          headers: {
+            ...form.getHeaders(),
+            Authorization: CLICKUP_TOKEN,
+          },
+        });
+      }
+
+      console.log("✅ ClickUp Upload Success:", response.data);
 
       // Cleanup local temp file
-      fs.unlinkSync(req.file.path);
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+
+      // Auto-post a comment in the chat view containing a native rich-text attachment or image block
+      try {
+        const senderName = req.user?.name || "Client";
+        const att = response.data;
+        const ext = (att.extension || att.name?.split('.').pop() || '').toLowerCase();
+        const isImg = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'svg'].includes(ext);
+
+        const commentUrl = isView 
+          ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
+          : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+
+        console.log(`📝 Auto-posting native rich attachment comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
+
+        // Format a clean, attributed sender tag only if using global token
+        const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
+
+        let commentBody = {};
+
+        if (isImg) {
+          // Create a native ClickUp image block comment!
+          commentBody = {
+            comment: [
+              {
+                text: ""
+              },
+              {
+                type: "image",
+                text: att.name || att.title || "Shared Image",
+                image: {
+                  id: att.id,
+                  name: att.name || att.title,
+                  title: att.title || att.name,
+                  type: ext,
+                  extension: `image/${ext}`,
+                  thumbnail_large: att.thumbnail_large || att.url,
+                  thumbnail_medium: att.thumbnail_medium || att.url,
+                  thumbnail_small: att.thumbnail_small || att.url,
+                  url: att.url,
+                  uploaded: true
+                },
+                attributes: {
+                  width: "300",
+                  "data-id": att.id
+                }
+              },
+              {
+                text: "\n"
+              }
+            ],
+            notify_all: true
+          };
+        } else {
+          // Create a native ClickUp file/attachment block comment!
+          commentBody = {
+            comment: [
+              {
+                text: ""
+              },
+              {
+                type: "attachment",
+                text: att.name || att.title || "Shared File",
+                attachment: {
+                  id: att.id,
+                  name: att.name || att.title,
+                  title: att.title || att.name,
+                  extension: ext,
+                  thumbnail_large: att.thumbnail_large || att.url,
+                  thumbnail_medium: att.thumbnail_medium || att.url,
+                  thumbnail_small: att.thumbnail_small || att.url,
+                  url: att.url,
+                  uploaded: true
+                },
+                attributes: {
+                  "data-id": att.id
+                }
+              },
+              {
+                text: "\n"
+              }
+            ],
+            notify_all: true
+          };
+        }
+
+        let commentRes = null;
+        if (hasCustomToken) {
+          try {
+            console.log("🔄 Auto-posting comment using custom client token...");
+            commentRes = await axios.post(commentUrl, commentBody, {
+              headers: {
+                Authorization: config.clickupToken,
+                'Content-Type': 'application/json'
+              },
+            });
+            console.log("✅ Auto-posted rich attachment comment successfully using custom token!");
+          } catch (err) {
+            console.error("⚠️ Custom token auto-post failed, falling back to global token...", err.response?.data || err.message);
+          }
+        }
+
+        if (!commentRes) {
+          console.log("🔄 Auto-posting comment using global token...");
+          
+          await axios.post(commentUrl, commentBody, {
+            headers: {
+              Authorization: CLICKUP_TOKEN,
+              'Content-Type': 'application/json'
+            },
+          });
+          console.log("✅ Auto-posted rich attachment comment successfully using global token!");
+        }
+      } catch (commentErr) {
+        console.error("⚠️ Failed to auto-post rich attachment comment:", commentErr.response?.data || commentErr.message);
+      }
 
       res.json({
         success: true,
         attachment: response.data
       });
     } catch (error) {
-      console.error("❌ ClickUp API Error (uploadAttachment):", error.response?.data || error.message);
+      const errorData = error.response?.data;
+      const status = error.response?.status;
+      
+      console.error(`❌ ClickUp API Error (uploadAttachment) [Status ${status}]:`, JSON.stringify(errorData, null, 2) || error.message);
+      
       // Try to cleanup even on error
       if (req.file && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
+
+      // If View attachment is not supported (404), explain why
+      if (status === 404) {
+        return res.status(404).json({ 
+          success: false, 
+          message: "ClickUp API Error: This chat view does not support direct attachments. Try uploading to a task instead.",
+          details: errorData 
+        });
+      }
+
+      res.status(status || 500).json({ 
+        success: false, 
+        message: "Failed to upload to ClickUp",
+        error: errorData || error.message 
+      });
     }
   }),
 
@@ -139,11 +471,32 @@ const clickupController = {
       const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
       const user_id = 88409188;
       const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${user_id}`;
-      const clickupRes = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
-      const worksDone = clickupRes.data.data.length;
+      const config = await getUserConfig(req.user.id);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
+      let clickupRes = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch time entries with custom token...`);
+          clickupRes = await axios.get(url, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token time entries fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token time entries fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!clickupRes) {
+        console.log(`🔄 Fetching time entries using global token...`);
+        clickupRes = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
+
+      const worksDone = clickupRes.data.data.length;
       const user = clickupRes.data.data[0]?.user;
       const timeEntries = clickupRes.data.data || [];
       const totalMilliseconds = timeEntries.reduce(
@@ -159,6 +512,7 @@ const clickupController = {
         worksDone,
       });
     } catch (e) {
+      console.error("❌ ClickUp Time Fetch Error:", e.response?.data || e.message);
       res.status(500).json({ error: e.message });
     }
   }),
@@ -166,16 +520,20 @@ const clickupController = {
   testClickUp: expressAsyncHandler(async (req, res) => {
     try {
       console.log("🧪 Testing ClickUp Connection...");
-      console.log("Token:", CLICKUP_TOKEN ? "✓ Present" : "✗ Missing");
-      console.log("LIST_ID:", LIST_ID);
+      const config = await getUserConfig(req.user.id);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
+      const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      const activeListId = config.listId || LIST_ID;
+      console.log("Token:", activeToken ? "✓ Present" : "✗ Missing");
+      console.log("LIST_ID:", activeListId);
       console.log("TEAM_ID:", TEAM_ID);
 
       // Test 1: Get list info
-      const listUrl = `https://api.clickup.com/api/v2/list/${LIST_ID}`;
+      const listUrl = `https://api.clickup.com/api/v2/list/${activeListId}`;
       console.log("Testing URL:", listUrl);
 
       const listResponse = await axios.get(listUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
+        headers: { Authorization: activeToken },
         timeout: 5000
       });
 
@@ -194,19 +552,22 @@ const clickupController = {
           space_id: listResponse.data.space?.id
         },
         config: {
-          token: CLICKUP_TOKEN ? "✓ Present" : "✗ Missing",
-          listId: LIST_ID,
+          token: activeToken ? "✓ Present" : "✗ Missing",
+          listId: activeListId,
           teamId: TEAM_ID
         }
       });
     } catch (error) {
       console.error("❌ Test Error:", error.response?.data || error.message);
+      const config = await getUserConfig(req.user.id).catch(() => ({}));
+      const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      const activeListId = config.listId || LIST_ID;
       res.status(500).json({
         success: false,
         error: error.response?.data || error.message,
         config: {
-          token: CLICKUP_TOKEN ? "✓ Present" : "✗ Missing",
-          listId: LIST_ID,
+          token: activeToken ? "✓ Present" : "✗ Missing",
+          listId: activeListId,
           teamId: TEAM_ID
         }
       });
@@ -215,20 +576,133 @@ const clickupController = {
     }
   }),
 
+  // Start OAuth: return a ClickUp authorization URL the frontend can redirect the user to
+  startOAuth: expressAsyncHandler(async (req, res) => {
+    try {
+      const clientId = process.env.VITE_CLICKUP_CLIENT_ID || process.env.CLICKUP_CLIENT_ID;
+      const redirectBase = process.env.CLICKUP_OAUTH_REDIRECT || process.env.BASE_URL || `http://localhost:3000`;
+      // The backend callback endpoint
+      const callbackUrl = `${redirectBase.replace(/\/$/, '')}/clickup/oauth/callback`;
+
+      if (!clientId) {
+        return res.status(500).json({ success: false, message: 'ClickUp client ID not configured on server' });
+      }
+
+      // Return the URL for the frontend to redirect the user to (keeps flexibility for frontend)
+      const authUrl = `https://app.clickup.com/api?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
+      return res.json({ success: true, url: authUrl });
+    } catch (err) {
+      console.error('❌ startOAuth error:', err.message || err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }),
+
+  // OAuth callback: exchange code for token and save to user
+  handleOAuthCallback: expressAsyncHandler(async (req, res) => {
+    try {
+      const code = req.query.code;
+      if (!code) return res.status(400).json({ success: false, message: 'Missing code' });
+
+      const clientId = process.env.VITE_CLICKUP_CLIENT_ID || process.env.CLICKUP_CLIENT_ID;
+      const clientSecret = process.env.VITE_CLICKUP_CLIENT_SECRET || process.env.CLICKUP_CLIENT_SECRET;
+
+      if (!clientId || !clientSecret) {
+        return res.status(500).json({ success: false, message: 'ClickUp client credentials not configured' });
+      }
+
+      // Exchange code for token
+      const tokenRes = await axios.post('https://api.clickup.com/api/v2/oauth/token', null, {
+        params: {
+          client_id: clientId,
+          client_secret: clientSecret,
+          code,
+        }
+      });
+
+      const accessToken = tokenRes.data?.access_token || tokenRes.data?.token || tokenRes.data?.accessToken || null;
+      if (!accessToken) {
+        console.error('❌ No access token returned:', tokenRes.data);
+        return res.status(500).json({ success: false, message: 'Failed to obtain ClickUp access token', details: tokenRes.data });
+      }
+
+      // Fetch ClickUp user profile to get their ClickUp user id
+      const profileRes = await axios.get('https://api.clickup.com/api/v2/user', {
+        headers: { Authorization: accessToken }
+      }).catch(e => null);
+
+      const clickupUserId = profileRes?.data?.user?.id || null;
+
+      // Save token & clickupId on the logged-in user
+      const userId = req.user?.id || req.user?._id;
+      if (!userId) {
+        return res.status(401).json({ success: false, message: 'User not authenticated' });
+      }
+
+      const update = { clickupToken: accessToken };
+      if (clickupUserId) update.clickupId = String(clickupUserId);
+
+      await User.findByIdAndUpdate(userId, update, { new: true });
+
+      // Redirect or respond success
+      // If called via browser redirect, provide a simple page
+      if (req.headers.accept && req.headers.accept.includes('text/html')) {
+        return res.send(`<html><body><script>window.opener && window.opener.postMessage({ type: 'CLICKUP_CONNECTED' }, '*'); window.close();</script><p>ClickUp connected. You can close this window.</p></body></html>`);
+      }
+
+      res.json({ success: true, message: 'ClickUp account connected', clickupUserId });
+    } catch (err) {
+      console.error('❌ OAuth callback error:', err.response?.data || err.message || err);
+      res.status(500).json({ success: false, error: err.response?.data || err.message });
+    }
+  }),
+
   getTasks: expressAsyncHandler(async (req, res) => {
     try {
-      // 1. Fetch List Details to get ALL possible statuses
-      const listUrl = `https://api.clickup.com/api/v2/list/${LIST_ID}`;
-      const listRes = await axios.get(listUrl, { headers: { Authorization: CLICKUP_TOKEN } });
+      const config = await getUserConfig(req.user.id);
+      const userListId = config.listId;
+
+      let listRes = null;
+      let response = null;
+      const customToken = config.clickupToken;
+
+      // Try with custom token first
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch list details and tasks with custom token...`);
+          listRes = await axios.get(`https://api.clickup.com/api/v2/list/${userListId}`, {
+            headers: { Authorization: customToken }
+          });
+          
+          let url = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true`;
+          if (config.clickupId) {
+            url += `&assignees[]=${config.clickupId}`;
+          }
+          response = await axios.get(url, {
+            headers: { Authorization: customToken }
+          });
+          console.log("✅ Custom token tasks fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token tasks fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      // Fallback to global token
+      if (!listRes || !response) {
+        console.log(`🔄 Fetching list details and tasks using global token...`);
+        listRes = await axios.get(`https://api.clickup.com/api/v2/list/${userListId}`, {
+          headers: { Authorization: CLICKUP_TOKEN }
+        });
+        
+        let url = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true`;
+        if (config.clickupId) {
+          url += `&assignees[]=${config.clickupId}`;
+        }
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN }
+        });
+      }
+
       const allStatuses = listRes.data.statuses || [];
-
-      // 2. Fetch Tasks
-      const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task?include_closed=true`;
-      console.log(`🔗 Fetching from List [${LIST_ID}]:`, url);
-
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
 
 
       const tasks = response.data.tasks.map(task => ({
@@ -280,7 +754,7 @@ const clickupController = {
 
       // Comprehensive Status Breakdown (Dynamic)
       const statusBreakdown = {};
-      
+
       // Initialize with all list statuses so they always appear in the chart/legend
       allStatuses.forEach(s => {
         statusBreakdown[s.status.toLowerCase()] = {
@@ -331,26 +805,44 @@ const clickupController = {
       if (!taskId) return res.status(400).json({ message: "Task ID is required" });
 
       console.log(`🔗 Fetching Activity for Task [${taskId}]`);
+      const config = await getUserConfig(req.user.id, taskId);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
-      // 1. Fetch Full Task Details (includes attachments)
-      const taskUrl = `https://api.clickup.com/api/v2/task/${taskId}`;
-      const taskRes = await axios.get(taskUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      let taskRes = null;
+      let timeEntriesRes = null;
+      let commentsRes = null;
+      const customToken = config.clickupToken;
 
-      // 2. Fetch Time Entries (Team level but filtered by task)
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting to fetch task activity with custom token...`);
+          taskRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
+            headers: { Authorization: customToken },
+          });
+          timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`, {
+            headers: { Authorization: customToken },
+          });
+          commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token task activity fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token task activity fetch failed, falling back to global token...", err.message);
+        }
+      }
 
-      // Note: We need the team_id. Using the one from config.
-      const timeEntriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`;
-      const timeEntriesRes = await axios.get(timeEntriesUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
-
-      // 3. Fetch Comments (optional but good for 'everything thya done')
-      const commentsUrl = `https://api.clickup.com/api/v2/task/${taskId}/comment`;
-      const commentsRes = await axios.get(commentsUrl, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      if (!taskRes || !timeEntriesRes || !commentsRes) {
+        console.log(`🔄 Fetching task activity using global token...`);
+        taskRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+        timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+        commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
 
       res.json({
         success: true,
@@ -472,10 +964,29 @@ const clickupController = {
         const entriesUrl = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${clickupId}`;
 
         try {
-          const clickupRes = await axios.get(entriesUrl, {
-            headers: { Authorization: CLICKUP_TOKEN },
-            timeout: 5000 // Add timeout to prevent hanging
-          });
+          let clickupRes = null;
+          const customToken = (user.clickupToken && user.clickupToken.trim()) ? user.clickupToken.trim() : null;
+
+          if (customToken && customToken !== CLICKUP_TOKEN) {
+            try {
+              console.log(`🔄 Attempting to fetch user time entries with custom token...`);
+              clickupRes = await axios.get(entriesUrl, {
+                headers: { Authorization: customToken },
+                timeout: 5000
+              });
+              console.log("✅ Custom token user time entries fetch successful!");
+            } catch (err) {
+              console.error("⚠️ Custom token user time entries fetch failed, falling back to global token...", err.message);
+            }
+          }
+
+          if (!clickupRes) {
+            console.log(`🔄 Fetching user time entries using global token...`);
+            clickupRes = await axios.get(entriesUrl, {
+              headers: { Authorization: CLICKUP_TOKEN },
+              timeout: 5000
+            });
+          }
 
           const timeEntries = clickupRes.data?.data || [];
 
@@ -616,8 +1127,9 @@ const clickupController = {
             const taskPromises = tasksToFetch.map(async (taskId) => {
               try {
                 const taskUrl = `https://api.clickup.com/api/v2/task/${taskId}`;
+                const tokenToUse = customToken && customToken !== CLICKUP_TOKEN ? customToken : CLICKUP_TOKEN;
                 const tRes = await axios.get(taskUrl, {
-                  headers: { Authorization: CLICKUP_TOKEN },
+                  headers: { Authorization: tokenToUse },
                   timeout: 3000
                 });
                 return {
@@ -944,6 +1456,40 @@ const clickupController = {
     }
   }),
 
+  // Public-facing member details: returns only DB member info (no ClickUp calls, no auth required)
+  getPublicMemberDetails: expressAsyncHandler(async (req, res) => {
+    try {
+      const { slug } = req.query;
+      if (!slug) return res.status(400).json({ message: 'Slug not provided' });
+
+      const member = await TeamMember.findOne({ slug }).populate({
+        path: 'user',
+        populate: [
+          { path: 'tools', select: 'toolName url icon description -_id' },
+          { path: 'clients', select: 'name website logo -_id' },
+          { path: 'reviews', select: 'name company review rating createdAt -_id', match: { approved: true } },
+          { path: 'achievements', select: 'title description image createdAt' }
+        ]
+      });
+
+      if (!member) return res.status(404).json({ message: 'Team member not found' });
+
+      // Ensure achievements exist on populated user object
+      if (member.user) {
+        const u = member.user;
+        if (!u.achievements || u.achievements.length === 0) {
+          const directAchievements = await Achievement.find({ user: u._id }).select('title description image createdAt').lean();
+          if (directAchievements.length > 0) u.achievements = directAchievements;
+        }
+      }
+
+      return res.json({ member });
+    } catch (err) {
+      console.error('getPublicMemberDetails error:', err);
+      return res.status(500).json({ message: 'Internal server error', error: err.message });
+    }
+  }),
+
   createTask: expressAsyncHandler(async (req, res) => {
     try {
       const { clientName, clientCompany, status, dueDate, priority } = req.body;
@@ -983,15 +1529,18 @@ const clickupController = {
 
       console.log("📋 Final Payload:", JSON.stringify(taskPayload, null, 2));
 
-      const url = `https://api.clickup.com/api/v2/list/${LIST_ID}/task`;
+      const config = await getUserConfig(req.user.id);
+      const userListId = config.listId;
+
+      const url = `https://api.clickup.com/api/v2/list/${userListId}/task`;
       console.log("📋 POST URL:", url);
 
-
-      console.log("📋 Authorization Header Length:", CLICKUP_TOKEN?.length);
+      const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      console.log("📋 Authorization Header Length:", activeToken?.length);
 
       const response = await axios.post(url, taskPayload, {
         headers: {
-          Authorization: CLICKUP_TOKEN,
+          Authorization: activeToken,
           "Content-Type": "application/json"
         },
         timeout: 10000
@@ -1040,13 +1589,47 @@ const clickupController = {
 
   getChatComments: expressAsyncHandler(async (req, res) => {
     try {
-      const { viewId } = req.params;
-      const url = `https://api.clickup.com/api/v2/view/${viewId}/comment`;
-      console.log(`🔗 Fetching Chat Comments from View [${viewId}]`);
+      let { viewId } = req.params;
+      const config = await getUserConfig(req.user.id, viewId);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
-      const response = await axios.get(url, {
-        headers: { Authorization: CLICKUP_TOKEN },
-      });
+      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
+        viewId = config.chatViewId || "8cn3v2y-28474";
+      }
+
+      if (!viewId) {
+        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+      }
+
+      // Detect if Task ID or View ID
+      const isView = viewId.includes('-');
+      const url = isView 
+        ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
+        : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+
+      console.log(`🔗 Fetching Chat Comments from ${isView ? 'View' : 'Task'} [${viewId}]`);
+
+      let response = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log("🔄 Attempting to fetch chat comments with custom token...");
+          response = await axios.get(url, {
+            headers: { Authorization: customToken },
+          });
+          console.log("✅ Custom token chat comments fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token comments fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!response) {
+        console.log("🔄 Fetching chat comments using global token...");
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+        });
+      }
 
       res.json({
         success: true,
@@ -1054,23 +1637,70 @@ const clickupController = {
       });
     } catch (error) {
       console.error("❌ ClickUp API Error (getChatComments):", error.response?.data || error.message);
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
+      res.json({ success: false, comments: [], error: error.response?.data || error.message });
     }
   }),
 
   postChatComment: expressAsyncHandler(async (req, res) => {
     try {
-      const { viewId } = req.params;
+      let { viewId } = req.params;
       const { comment_text } = req.body;
+      const config = await getUserConfig(req.user.id, viewId);      
       
-      const url = `https://api.clickup.com/api/v2/view/${viewId}/comment`;
-      console.log(`📝 Posting Comment to View [${viewId}]`);
+      // Allow frontend to force a per-request token via header or body
+      const overrideToken = req.headers['x-clickup-token'] || req.body?.clickupToken;
+      if (overrideToken && String(overrideToken).trim()) {
+        config.clickupToken = String(overrideToken).trim();
+      }
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
+      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
+        viewId = config.chatViewId || "8cn3v2y-28474";
+      }
+
+      if (!viewId) {
+        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+      }
+
+      // Detect if Task ID or View ID
+      const isView = viewId.includes('-');
+      const url = isView 
+        ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
+        : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+
+      console.log(`📝 Posting Comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
+
+      const senderName = req.user.name || "Client";
+      const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
+
+      if (hasCustomToken) {
+        try {
+          console.log("🔄 Attempting to post comment using custom client token...");
+          const response = await axios.post(url, {
+            comment_text: comment_text,
+            notify_all: true
+          }, {
+            headers: {
+              Authorization: config.clickupToken,
+              'Content-Type': 'application/json'
+            },
+          });
+          console.log("✅ Successfully posted comment using custom client token!");
+          return res.json({
+            success: true,
+            comment: response.data
+          });
+        } catch (err) {
+}
+      }
+
+      console.log("🔄 Posting comment using global token with sender prefix...");
+      const commentTextToSend = `${comment_text}`;
       const response = await axios.post(url, {
-        comment_text,
+        comment_text: commentTextToSend,
         notify_all: true
       }, {
-        headers: { 
+        headers: {
           Authorization: CLICKUP_TOKEN,
           'Content-Type': 'application/json'
         },
@@ -1080,24 +1710,286 @@ const clickupController = {
         success: true,
         comment: response.data
       });
-    } catch (error) {
-      console.error("❌ ClickUp API Error (postChatComment):", error.response?.data || error.message);
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
+    } catch (err) {
+          console.error("⚠️ Custom token post failed, falling back to global token...", err.response?.data || err.message);
+        }
+  }),
+
+  getGeneralActivity: expressAsyncHandler(async (req, res) => {
+    try {
+      const config = await getUserConfig(req.user.id);
+      try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
+      const userListId = config.listId;
+
+      console.log(`🔗 Fetching Combined Task Log & Activity for List [${userListId}]`);
+      
+      // 0. Dynamically find the Team ID (Workspace) to avoid 404s and fetch tasks
+      let dynamicTeamId = TEAM_ID;
+      let tasksRes = null;
+      const customToken = config.clickupToken;
+
+      if (customToken && customToken !== CLICKUP_TOKEN) {
+        try {
+          console.log(`🔄 Attempting general activity fetch with custom token...`);
+          const teamRes = await axios.get('https://api.clickup.com/api/v2/team', { 
+            headers: { Authorization: customToken },
+            timeout: 5000
+          });
+          if (teamRes.data.teams?.length > 0) {
+            dynamicTeamId = teamRes.data.teams[0].id;
+          }
+          const tasksUrl = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true&subtasks=true&limit=60`;
+          tasksRes = await axios.get(tasksUrl, { headers: { Authorization: customToken } });
+          console.log("✅ Custom token general activity fetch successful!");
+        } catch (err) {
+          console.error("⚠️ Custom token activity fetch failed, falling back to global token...", err.message);
+        }
+      }
+
+      if (!tasksRes) {
+        console.log(`🔄 Fetching general activity using global token...`);
+        try {
+          const teamRes = await axios.get('https://api.clickup.com/api/v2/team', { 
+            headers: { Authorization: CLICKUP_TOKEN },
+            timeout: 5000
+          });
+          if (teamRes.data.teams?.length > 0) {
+            dynamicTeamId = teamRes.data.teams[0].id;
+          }
+        } catch (err) {
+          console.warn("⚠️ Failed to fetch dynamic Team ID with global token.");
+        }
+        const tasksUrl = `https://api.clickup.com/api/v2/list/${userListId}/task?include_closed=true&subtasks=true&limit=60`;
+        tasksRes = await axios.get(tasksUrl, { headers: { Authorization: CLICKUP_TOKEN } });
+      }
+
+      const tasks = tasksRes.data.tasks || [];
+
+      let mergedActivity = [];
+
+      // 2. Map Task Creations, Statuses, and Attachments (Baseline data)
+      tasks.forEach(task => {
+        try {
+          const taskName = task.name || 'Project Task';
+          const userName = task.creator?.username || 'Team Member';
+
+          // A. Always add Creation Event
+          if (task.date_created) {
+            const createDate = new Date(parseInt(task.date_created));
+            if (!isNaN(createDate.getTime())) {
+              mergedActivity.push({
+                id: `create-${task.id}`,
+                user: userName,
+                target: taskName,
+                type: 'create',
+                time: createDate.toISOString()
+              });
+            }
+          }
+
+          // B. Add "Completed" Event if task is currently closed/done
+          const statusStr = (task.status?.status || '').toLowerCase();
+          const isClosed = task.status?.type === 'closed' || statusStr.includes('complete') || statusStr.includes('done') || statusStr.includes('closed');
+          
+          if (isClosed && (task.date_done || task.date_updated)) {
+            const doneDate = new Date(parseInt(task.date_done || task.date_updated));
+            if (!isNaN(doneDate.getTime())) {
+              mergedActivity.push({
+                id: `done-static-${task.id}`,
+                user: userName,
+                target: taskName,
+                type: 'complete',
+                time: doneDate.toISOString()
+              });
+            }
+          }
+
+          // C. Add "In Progress" Event if task is currently active
+          const isInProgress = task.status?.type === 'in-progress' || statusStr.includes('progress') || statusStr.includes('working') || statusStr.includes('active');
+          if (isInProgress && task.date_updated) {
+            const progressDate = new Date(parseInt(task.date_updated));
+            if (!isNaN(progressDate.getTime())) {
+              mergedActivity.push({
+                id: `progress-static-${task.id}`,
+                user: userName,
+                target: taskName,
+                type: 'in-progress',
+                time: progressDate.toISOString()
+              });
+            }
+          }
+
+          // D. Add Historical Attachments
+          if (task.attachments && Array.isArray(task.attachments)) {
+            task.attachments.forEach(att => {
+              if (att.date) {
+                const attDate = new Date(parseInt(att.date));
+                if (!isNaN(attDate.getTime())) {
+                  const ext = att.extension || (att.url ? att.url.split('.').pop().split('?')[0].toLowerCase() : '');
+                  mergedActivity.push({
+                    id: `upload-${att.id}`,
+                    user: userName,
+                    target: taskName,
+                    type: 'upload',
+                    image: att.thumbnail_large || att.url,
+                    url: att.url,
+                    extension: ext,
+                    time: attDate.toISOString()
+                  });
+                }
+              }
+            });
+          }
+        } catch (err) {
+          console.warn(`⚠️ Error mapping task ${task.id}:`, err.message);
+        }
+      });
+
+
+      // 3. Layer in Recent Team Activity (Live Events)
+      try {
+        const activityUrl = `https://api.clickup.com/api/v2/team/${dynamicTeamId}/activity?list_ids[]=${userListId}&limit=100`;
+        let activityRes = null;
+
+        if (customToken && customToken !== CLICKUP_TOKEN) {
+          try {
+            console.log(`🔄 Attempting general activity with custom token...`);
+            activityRes = await axios.get(activityUrl, { 
+              headers: { Authorization: customToken },
+              timeout: 8000
+            });
+            console.log("✅ Custom token general activity fetch successful!");
+          } catch (err) {
+            console.error("⚠️ Custom token activity fetch failed, falling back to global token...", err.message);
+          }
+        }
+
+        if (!activityRes) {
+          console.log(`🔄 Fetching general activity using global token...`);
+          activityRes = await axios.get(activityUrl, { 
+            headers: { Authorization: CLICKUP_TOKEN },
+            timeout: 8000
+          });
+        }
+        
+        const rawActivities = activityRes.data.activities || [];
+
+        rawActivities.forEach(act => {
+          try {
+            let type = null;
+            let image = null;
+            let url = null;
+            let extension = null;
+            
+            const after = act.details?.after;
+            const afterStr = (typeof after === 'object' ? after?.status || after?.priority || JSON.stringify(after) : String(after || '')).toLowerCase();
+
+            switch(act.type) {
+              case 'statusUpdated':
+                if (afterStr.includes('complete') || afterStr.includes('closed') || afterStr.includes('done')) {
+                  type = 'complete';
+                } else if (afterStr.includes('progress') || afterStr.includes('working') || afterStr.includes('active')) {
+                  type = 'in-progress';
+                }
+                break;
+              case 'priorityUpdated':
+                if (afterStr === '1' || afterStr.includes('high') || afterStr.includes('urgent')) {
+                  type = 'priority';
+                }
+                break;
+              case 'taskDeleted':
+                type = 'delete';
+                break;
+              case 'attachmentAdded':
+                type = 'upload';
+                const att = act.details?.attachment;
+                image = att?.thumbnail_large || att?.url;
+                url = att?.url;
+                extension = att?.extension || (url ? url.split('.').pop().split('?')[0].toLowerCase() : '');
+                break;
+            }
+
+            if (type && act.date) {
+              const actDate = new Date(parseInt(act.date));
+              if (!isNaN(actDate.getTime())) {
+                mergedActivity.push({
+                  id: `act-${act.id}`,
+                  user: act.user?.username || 'Team Member',
+                  target: act.task?.name || 'Project Task',
+                  type,
+                  image,
+                  url,
+                  extension,
+                  time: actDate.toISOString()
+                });
+              }
+            }
+          } catch (itemErr) {
+            console.warn("⚠️ Error mapping activity item:", itemErr.message);
+          }
+        });
+      } catch (actError) {
+        console.error("⚠️ Team Activity API Failed:", actError.response?.data || actError.message);
+      }
+
+
+      // 4. Deduplicate and Sort
+      const finalActivity = Array.from(
+        mergedActivity.reduce((map, item) => map.set(item.id, item), new Map()).values()
+      ).sort((a, b) => new Date(b.time) - new Date(a.time))
+       .slice(0, 50);
+
+      res.json({
+        success: true,
+        activity: finalActivity
+      });
+    } catch (e) {
+      console.error("❌ Fatal Activity Error:", e.response?.data || e.message);
+      res.status(500).json({ success: false, error: e.message });
     }
   })
+
+
+
+
+
 };
 
-module.exports = clickupController;
+module.exports = {
+  ...clickupController,
+  getUserConfig,
+  clickupStorage
+};
 
 // --- helper functions kept for other endpoints ---
 
-async function getWorkedTasksLast30Days() {
+async function getWorkedTasksLast30Days(config = null) {
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
   const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}`;
-  const clickupRes = await axios.get(url, {
-    headers: { Authorization: CLICKUP_TOKEN },
-  });
+  
+  let clickupRes = null;
+  const customToken = config?.clickupToken;
+
+  if (customToken && customToken !== CLICKUP_TOKEN) {
+    try {
+      console.log(`🔄 Attempting to fetch worked tasks with custom token...`);
+      clickupRes = await axios.get(url, {
+        headers: { Authorization: customToken },
+      });
+      console.log("✅ Custom token worked tasks fetch successful!");
+    } catch (err) {
+      console.error("⚠️ Custom token worked tasks fetch failed, falling back to global token...", err.message);
+    }
+  }
+
+  if (!clickupRes) {
+    console.log(`🔄 Fetching worked tasks using global token...`);
+    clickupRes = await axios.get(url, {
+      headers: { Authorization: CLICKUP_TOKEN },
+    });
+  }
+
   const timeEntries = clickupRes.data.data || [];
   const uniqueTaskIds = [
     ...new Set(timeEntries.map((entry) => entry.task?.id || entry.task).filter(Boolean)),
@@ -1108,14 +2000,34 @@ async function getWorkedTasksLast30Days() {
   };
 }
 
-async function getTasksWorkedByMemberLast30Days() {
+async function getTasksWorkedByMemberLast30Days(config = null) {
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
   const user_id = 88409188;
   const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?start_date=${thirtyDaysAgo}&end_date=${now}&assignee=${user_id}`;
-  const clickupRes = await axios.get(url, {
-    headers: { Authorization: CLICKUP_TOKEN },
-  });
+  
+  let clickupRes = null;
+  const customToken = config?.clickupToken;
+
+  if (customToken && customToken !== CLICKUP_TOKEN) {
+    try {
+      console.log(`🔄 Attempting to fetch member tasks with custom token...`);
+      clickupRes = await axios.get(url, {
+        headers: { Authorization: customToken },
+      });
+      console.log("✅ Custom token member tasks fetch successful!");
+    } catch (err) {
+      console.error("⚠️ Custom token member tasks fetch failed, falling back to global token...", err.message);
+    }
+  }
+
+  if (!clickupRes) {
+    console.log(`🔄 Fetching member tasks using global token...`);
+    clickupRes = await axios.get(url, {
+      headers: { Authorization: CLICKUP_TOKEN },
+    });
+  }
+
   const timeEntries = clickupRes.data.data || [];
   const uniqueTaskIds = [
     ...new Set(timeEntries.map((entry) => entry.task?.id || entry.task).filter(Boolean)),

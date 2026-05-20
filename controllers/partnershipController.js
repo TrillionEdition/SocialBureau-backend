@@ -213,18 +213,18 @@ const partnershipController = {
       gmeetLink: realGmeetLink
     });
 
-    const subject = `Confirmed: Meeting Invitation - ${userName} & ${partnerName}`;
+    const subject = `Meeting Invitation Registered - ${userName} & ${partnerName}`;
     
     // HTML version of the email for a professional look
     const html = `
       <div style="font-family: 'Inter', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
         <div style="background-color: #111; color: #fff; padding: 24px; text-align: center;">
-          <h1 style="margin: 0; font-size: 20px;">Meeting Invitation Confirmed</h1>
+          <h1 style="margin: 0; font-size: 20px;">Meeting Invitation Registered</h1>
           <p style="margin: 5px 0 0 0; opacity: 0.8; font-size: 14px;">SocialBureau Partnership Team</p>
         </div>
         <div style="padding: 30px; color: #333; line-height: 1.6;">
           <p>Hello <strong>${userName}</strong>,</p>
-          <p>Your meeting with <strong>${partnerName}</strong> has been successfully scheduled. Below are the details:</p>
+          <p>Your meeting with <strong>${partnerName}</strong> has been successfully registered. Below are the details:</p>
           
           <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <table style="width: 100%; border-collapse: collapse;">
@@ -243,15 +243,17 @@ const partnershipController = {
             </table>
           </div>
           
-          <div style="text-align: center; margin: 30px 0;">
-            <a href="${realGmeetLink}" style="background-color: #111; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 30px; font-weight: bold; display: inline-block;">
-              JOIN GOOGLE MEET
-            </a>
-            <p style="margin-top: 10px; font-size: 12px; color: #666;">Link: ${realGmeetLink}</p>
+          <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #fff9e6; border-radius: 8px; border: 1px solid #ffeeba;">
+            <p style="margin: 0; color: #856404; font-weight: bold;">
+              The official Google Meet link will be sent to your email 30 minutes before the meeting starts.
+            </p>
+            <p style="margin: 10px 0 0 0; font-size: 13px; color: #856404;">
+              Please keep an eye on your inbox!
+            </p>
           </div>
 
           <p style="font-size: 13px; color: #666; font-style: italic;">
-            Note: This meeting has been automatically scheduled. A calendar invitation has also been sent to your email.
+            Note: This meeting has been registered in our system. A calendar invitation has also been sent to your email.
           </p>
         </div>
         <div style="background-color: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #888; border-top: 1px solid #eee;">
@@ -485,6 +487,32 @@ const partnershipController = {
     res.json({
       success: true,
       data: partner,
+    });
+  }),
+
+  // Check meeting status for an email
+  checkMeeting: asyncHandler(async (req, res) => {
+    const { email } = req.query;
+
+    if (!email) {
+      res.status(400);
+      throw new Error("Email is required");
+    }
+
+    // Find the most recent meeting for this email
+    const meeting = await Meeting.findOne({ userEmail: email })
+      .sort("-userDate");
+
+    if (!meeting) {
+      return res.json({ exists: false });
+    }
+
+    res.json({
+      exists: true,
+      status: meeting.status,
+      userDate: meeting.userDate,
+      partnerName: meeting.partnerName,
+      meetingId: meeting._id
     });
   }),
 };

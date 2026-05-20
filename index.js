@@ -83,6 +83,7 @@ const startServer = async () => {
     
     // Start cron jobs after DB is connected
     require("./cron/newsletterCron");
+    require("./cron/meetingCron");
 
     app.listen(PORT, () => {
       console.log(`\n${"=".repeat(50)}`);

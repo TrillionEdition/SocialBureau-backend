@@ -10,11 +10,28 @@ const privateKey = process.env.GOOGLE_PRIVATE_KEY
   ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n").replace(/^"|"$/g, "")
   : null;
 
-const auth = new google.auth.JWT({
-  email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-  key: privateKey,
-  scopes: SCOPES,
-});
+// Initialize Auth
+let auth;
+
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN) {
+  // Option A: Use OAuth2 (Required for @gmail.com accounts to generate real Meet links)
+  auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  auth.setCredentials({
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN
+  });
+  console.log("✅ Using OAuth2 for Google Services");
+} else {
+  // Option B: Use Service Account (Requires Domain-Wide Delegation for Meet links)
+  auth = new google.auth.JWT({
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: privateKey,
+    scopes: SCOPES,
+  });
+  console.log("🤖 Using Service Account for Google Services");
+}
 
 const sheets = google.sheets({ version: "v4", auth });
 const calendar = google.calendar({ version: "v3", auth });
@@ -80,13 +97,10 @@ Partner Email: ${data.partnerEmail}
         dateTime: endTime.toISOString(),
         timeZone: "Asia/Kolkata",
       },
-
-      // ❗ IMPORTANT: Keep attendees empty if you don't want invites
       attendees: [],
-
       conferenceData: {
         createRequest: {
-          requestId: uuidv4(),
+          requestId: `sb-${uuidv4()}`,
           conferenceSolutionKey: { type: "hangoutsMeet" },
         },
       },

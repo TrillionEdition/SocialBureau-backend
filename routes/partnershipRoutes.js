@@ -8,6 +8,7 @@ const upload = require("../middlewares/cloudflare");
 partnershipRoutes.get("/student-stats", partnershipController.getStudentStats);
 partnershipRoutes.get("/dashboard-stats", partnershipController.getDashboardStats);
 partnershipRoutes.post("/schedule-meeting", partnershipController.scheduleMeeting);
+partnershipRoutes.get("/check-meeting", partnershipController.checkMeeting);
 
 partnershipRoutes.post("/", userAuthentication, adminAuthentication, partnershipController.createPartner);
 partnershipRoutes.get("/", partnershipController.getPartners);

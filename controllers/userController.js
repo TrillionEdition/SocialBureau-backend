@@ -1,5 +1,5 @@
 const express = require("express")
-const bcrypt = require("bcrypt")
+const bcrypt = require("bcryptjs")
 const jwt = require("jsonwebtoken")
 const asyncHandler = require("express-async-handler")
 const User = require("../models/userModel")
@@ -13,16 +13,71 @@ const { getLatestPublishedBlog, getLatestActiveJob } = require("../services/blog
 
 const crypto = require("crypto");
 const { storeVerificationCode, getVerificationCode, removeVerificationCode } = require("../utils/redis/Advancedcaching");
+const { default: axios } = require("axios");
 
 // helper to get upload URL from multer/cloudinary file object
 function getUrlFromFile(f) {
   return f?.path || f?.secure_url || f?.url || f?.location || f?.publicUrl || null;
 }
+
+const syncClickupName = async (user) => {
+  try {
+    let clickupUsername = null;
+
+    // 1. Try custom token if present
+    if (user.clickupToken) {
+      try {
+        console.log(`🔄 Syncing ClickUp profile for ${user.email} using custom token...`);
+        const response = await axios.get('https://api.clickup.com/api/v2/user', {
+          headers: { Authorization: user.clickupToken },
+          timeout: 5000
+        });
+        if (response.data?.user?.username) {
+          clickupUsername = response.data.user.username;
+          console.log(`✅ Synced ClickUp Name using custom token: ${clickupUsername}`);
+        }
+      } catch (err) {
+        console.log(`⚠️ Custom token auth failed, falling back to global token search: ${err.message}`);
+      }
+    }
+
+    // 2. Try global token with clickupId if username not resolved yet
+    if (!clickupUsername && user.clickupId) {
+      console.log(`🔄 Syncing ClickUp profile for ${user.email} using assignee ID [${user.clickupId}]...`);
+      const globalToken = process.env.VITE_CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN || user.clickupToken;
+      if (globalToken) {
+        const response = await axios.get('https://api.clickup.com/api/v2/team', {
+          headers: { Authorization: globalToken },
+          timeout: 5000
+        });
+        const teams = response.data?.teams || [];
+        for (const team of teams) {
+          const memberObj = team.members.find(m => String(m.user?.id) === String(user.clickupId));
+          if (memberObj?.user?.username) {
+            clickupUsername = memberObj.user.username;
+            console.log(`✅ Synced ClickUp Name via Team Member List: ${clickupUsername}`);
+            break;
+          }
+        }
+      }
+    }
+
+    if (clickupUsername) {
+      user.name = clickupUsername;
+    }
+  } catch (err) {
+    console.error("⚠️ Failed to sync ClickUp name:", err.response?.data || err.message);
+  }
+};
+
 const userController = {
 
   register: asyncHandler(async (req, res) => {
-    const { clickupId, email, name, password, role, emp_id, doj, rate, phone, isEmployee } = req.body;
+    const { clickupId, clickupListId, clickupChatViewId, clickupToken, email, name, password, role, emp_id, doj, rate, phone, isEmployee } = req.body;
     console.log(" Register attempt with email:", email);
+
+    const sanitizedClickupId = (clickupId && String(clickupId).trim()) ? String(clickupId).trim() : undefined;
+    const sanitizedRate = (rate && String(rate).trim()) ? Number(rate) : undefined;
 
     if (email) {
       const emailExists = await User.findOne({
@@ -37,13 +92,7 @@ const userController = {
       }
     }
 
-    if (clickupId) {
-      const userExists = await User.findOne({ clickupId });
-      if (userExists) {
-        res.status(400);
-        throw new Error('User already exists');
-      }
-    }
+
 
     let toolsInput = req.body.tools;
     console.log("Raw tools from req.body:", toolsInput, typeof toolsInput);
@@ -207,28 +256,31 @@ const userController = {
 
 
     const hashed_password = await bcrypt.hash(password, 10);
-    const now = new Date();
-    const joinDate = new Date(doj);
+    let exp = "0";
 
-    let years = now.getFullYear() - joinDate.getFullYear();
-    let months = now.getMonth() - joinDate.getMonth();
-    let days = now.getDate() - joinDate.getDate();
+    if (doj) {
+      const now = new Date();
+      const joinDate = new Date(doj);
 
-    if (days < 0) {
-      months--;
-      days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      let years = now.getFullYear() - joinDate.getFullYear();
+      let months = now.getMonth() - joinDate.getMonth();
+      let days = now.getDate() - joinDate.getDate();
+
+      if (days < 0) {
+        months--;
+        days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+      }
+      if (months < 0) {
+        years--;
+        months += 12;
+      }
+      exp = `${years}.${months}`;
     }
-    if (months < 0) {
-      years--;
-      months += 12;
-    }
-
-    const exp = `${years}.${months}`;
 
     const userCreated = await User.create({
-      clickupId,
+      clickupId: sanitizedClickupId,
       email,
-      rate,
+      rate: sanitizedRate,
       role,
       isEmployee,
       name,
@@ -240,7 +292,14 @@ const userController = {
       exp,
       tools: toolIds,
       clients: uniqueClientIds,
+      clickupListId,
+      clickupChatViewId,
+      clickupToken,
     });
+
+    // Sync ClickUp Name on creation
+    await syncClickupName(userCreated);
+    await userCreated.save();
 
 
 
@@ -338,7 +397,20 @@ const userController = {
       throw new Error("User not found");
     }
 
-    const passwordMatch = await bcrypt.compare(password, userExist.password);
+    if (!password) {
+      res.status(400);
+      throw new Error("Password is required");
+    }
+
+    let passwordMatch = false;
+    try {
+      passwordMatch = await bcrypt.compare(password, userExist.password || "");
+    } catch (bcryptErr) {
+      console.error("❌ Bcrypt error:", bcryptErr);
+      res.status(500);
+      throw new Error("Internal authentication error");
+    }
+
     if (!passwordMatch) {
       res.status(400);
       throw new Error("Invalid credentials");
@@ -349,15 +421,20 @@ const userController = {
     const isEmployee = Boolean(userExist.isEmployee);
     const isVerified = userExist.verification === true; // Boolean comparison only
 
+    // Sync ClickUp Name on login
+    await syncClickupName(userExist);
+    await userExist.save();
+
     const payload = {
-      id: userExist._id,
-      email: userExist.email,
+      id: userExist._id.toString(),
       name: userExist.name,
+      email: userExist.email,
       role: userExist.role,
-      verification: userExist.verification,
+      verification: !!userExist.verification,
     };
 
-    const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
+    const secret = process.env.JWT_SECRET_KEY || "SocialBureau";
+    const token = jwt.sign(payload, secret, {
       expiresIn: "1d",
     });
 
@@ -374,9 +451,14 @@ const userController = {
       token,
       user: {
         id: userExist._id,
+        name: userExist.name,
         email: userExist.email,
         role: userExist.role,
         verification: userExist.verification,
+        clickupId: userExist.clickupId,
+        clickupListId: userExist.clickupListId,
+        clickupChatViewId: userExist.clickupChatViewId,
+        clickupToken: userExist.clickupToken,
         isEmployee,
         isVerified,
         hasPaidInfluencer: userExist.hasPaidInfluencer,
@@ -393,7 +475,7 @@ const userController = {
     try {
       const users = await User.find(
         {},
-        "name rating exp rate coverImage idCard tools role"
+        "name rating exp rate coverImage idCard tools role email clickupId clickupListId clickupChatViewId clickupToken"
       )
         .populate({
           path: "tools",
@@ -815,11 +897,22 @@ const userController = {
       user.name = req.body.name || user.name;
       user.email = req.body.email || user.email;
       user.role = req.body.role || user.role;
-      user.phone = req.body.phone || user.phone;
-      user.rate = req.body.rate || user.rate;
+      if (req.body.phone !== undefined) {
+        user.phone = (req.body.phone && String(req.body.phone).trim()) ? Number(req.body.phone) : undefined;
+      }
+      if (req.body.rate !== undefined) {
+        user.rate = (req.body.rate && String(req.body.rate).trim()) ? Number(req.body.rate) : undefined;
+      }
       user.exp = req.body.exp || user.exp;
       user.doj = req.body.doj || user.doj;
       user.emp_id = req.body.emp_id || user.emp_id;
+      if (req.body.clickupId !== undefined) {
+        user.clickupId = (req.body.clickupId && String(req.body.clickupId).trim()) ? String(req.body.clickupId).trim() : undefined;
+      }
+      user.clickupListId = req.body.clickupListId || user.clickupListId;
+      user.clickupChatViewId = req.body.clickupChatViewId || user.clickupChatViewId;
+      user.clickupToken = req.body.clickupToken !== undefined ? req.body.clickupToken : user.clickupToken;
+
       // Team Page Details
       user.bgColor = req.body.bgColor || user.bgColor;
       
@@ -973,6 +1066,8 @@ const userController = {
       // Handle file uploads
       const avatarFile = req.files?.avatar?.[0]; 
       const cardImageFile = req.files?.cardImage?.[0]; 
+      const coverFile = req.files?.coverImage?.[0];
+      const idCardFile = req.files?.idCard?.[0];
 
       if (coverFile) {
         user.coverImage = getUrlFromFile(coverFile);
@@ -987,6 +1082,8 @@ const userController = {
       if (req.body.password) {
         user.password = await bcrypt.hash(req.body.password, 10);
       }
+
+      await syncClickupName(user);
 
       const updatedUser = await user.save();
 
@@ -1088,6 +1185,18 @@ const userController = {
     }
   }),
 
+
+  deleteUser: asyncHandler(async (req, res) => {
+    const user = await User.findById(req.params.id);
+
+    if (user) {
+      await User.findByIdAndDelete(req.params.id);
+      res.json({ message: "User removed successfully" });
+    } else {
+      res.status(404);
+      throw new Error("User not found");
+    }
+  }),
 
 };
 

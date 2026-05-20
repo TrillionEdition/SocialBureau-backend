@@ -37,6 +37,7 @@ userRouter.put('/:id', upload.fields([
     { name: 'avatar', maxCount: 1 }, // Added avatar support
     { name: 'toolIcons', maxCount: 20 }
 ], 'socialbureau-media/images/users'), userController.updateUser);
+userRouter.delete('/:id', userAuthentication, isAdmin, userController.deleteUser);
 
 module.exports = userRouter
 
