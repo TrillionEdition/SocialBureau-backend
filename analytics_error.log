@@ -1,5 +1,0 @@
-[2026-05-20T04:55:10.801Z] /api/analytics error: ENOENT: no such file or directory, open 'C:\Users\webas\BC\SocialBureau-backend\social-bureau-analytics-630a396efe7c.json'
-Stack: Error: ENOENT: no such file or directory, open 'C:\Users\webas\BC\SocialBureau-backend\social-bureau-analytics-630a396efe7c.json'
-Query: {"range":"last30Days"}
-User: {"email":"mouse@gmail.com","id":"6989a86e1571e6341a978657","name":"Web Asst","role":"admin","verification":false}
----
