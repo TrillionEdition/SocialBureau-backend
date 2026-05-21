@@ -705,15 +705,15 @@ const clickupController = {
       const allStatuses = listRes.data.statuses || [];
 
 
-      const tasks = response.data.tasks.map(task => ({
+      const tasks = (response.data.tasks || []).map(task => ({
         id: task.id,
-        title: task.name,
-        status: task.status.status,
-        statusColor: task.status.color,
+        title: task.name || 'Untitled Task',
+        status: task.status?.status || 'Unknown',
+        statusColor: task.status?.color || '#999',
         deadline: task.due_date ? new Date(parseInt(task.due_date)).toLocaleDateString() : 'No deadline',
         priority: task.priority?.priority || 'none',
         priorityColor: task.priority?.color || '#999',
-        assignees: task.assignees.map(a => ({
+        assignees: (task.assignees || []).map(a => ({
           name: a.username,
           initials: a.initials,
           color: a.color
@@ -798,7 +798,6 @@ const clickupController = {
     }
   }),
 
-
   getTaskActivity: expressAsyncHandler(async (req, res) => {
     try {
       const { taskId } = req.params;
@@ -869,9 +868,6 @@ const clickupController = {
       res.status(500).json({ success: false, error: e.message });
     }
   }),
-
-
-
 
   getTasksById: expressAsyncHandler(async (req, res) => {
     try {

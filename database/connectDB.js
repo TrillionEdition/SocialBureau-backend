@@ -17,6 +17,9 @@ async function connectDB() {
       throw new Error("MONGO_URI not set in environment");
     }
 
+    console.log("🔌 Attempting MongoDB connection...");
+    console.log("📍 MongoDB URI (masked):", process.env.MONGO_URI.replace(/:[^:]*@/, ":****@"));
+
     const opts = {
       // Enable Mongoose buffering commands while the connection is being established
       // This prevents "MongooseError: Cannot call find() before initial connection is complete"
@@ -28,7 +31,7 @@ async function connectDB() {
     };
 
     globalAny._mongo.promise = mongoose.connect(process.env.MONGO_URI, opts).then((mongooseInstance) => {
-      console.log("✅ New MongoDB connection established");
+      console.log("✅ New MongoDB connection established successfully");
       return mongooseInstance;
     });
   }
@@ -39,7 +42,12 @@ async function connectDB() {
     return conn;
   } catch (err) {
     globalAny._mongo.promise = null;
-    console.error("❌ MongoDB connection error:", err);
+    console.error("❌ MongoDB connection error:", err.message);
+    console.error("💡 Troubleshooting tips:");
+    console.error("   1. Check MongoDB Atlas IP whitelist includes your machine");
+    console.error("   2. Verify MONGO_URI credentials are correct in .env");
+    console.error("   3. Ensure MongoDB cluster is active");
+    console.error("   4. Check network connectivity to MongoDB servers");
     throw err;
   }
 }
