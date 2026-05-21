@@ -34,6 +34,8 @@ clickupRoutes.get('/time', authWithContext, clickupController.getTime);
 clickupRoutes.get('/user-task', authWithContext, clickupController.getTasksById);
 clickupRoutes.get('/user-details', authWithContext, clickupController.getUserDetails);
 clickupRoutes.get('/member-details', authWithContext, clickupController.getMemberDetails);
+// Public endpoint for member profile basic info (no ClickUp data) - does not require auth
+clickupRoutes.get('/public-member-details', clickupController.getPublicMemberDetails);
 clickupRoutes.get('/test', authWithContext, clickupController.testClickUp);
 // OAuth connect flow for ClickUp (start + callback)
 clickupRoutes.get('/oauth/start', userAuthentication, clickupController.startOAuth);
