@@ -8,6 +8,7 @@ const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const helmet = require("helmet");
 const path = require("path");
+const fs = require("fs");
 
 const app = express();
 
@@ -66,6 +67,26 @@ app.use(
 // Static files for uploads
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
+
+// Serve frontend `dist` (if present) and ensure correct MIME for any .jsx files
+const frontendDist = path.join(__dirname, "..", "frontend", "dist");
+if (fs.existsSync(frontendDist)) {
+  app.use(
+    express.static(frontendDist, {
+      setHeaders(res, filePath) {
+        if (filePath.endsWith('.jsx')) {
+          res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+        }
+      },
+    })
+  );
+
+  // SPA fallback — use a RegExp route to avoid path-to-regexp '*' parsing issues
+  app.get(/.*/, (req, res, next) => {
+    if (req.method !== 'GET') return next();
+    res.sendFile(path.join(frontendDist, 'index.html'));
+  });
+}
 
 // ================== ROUTES ==================
 app.use("/", router);
