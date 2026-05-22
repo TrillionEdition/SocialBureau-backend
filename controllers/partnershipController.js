@@ -180,37 +180,15 @@ const partnershipController = {
       });
     }
 
-    // 2. Generate Real Google Meet Link via Google Calendar
-    const realGmeetLink = await googleService.createCalendarEvent({
-      userName,
-      userEmail,
-      selectedService,
-      userDate,
-      partnerName,
-      partnerEmail,
-      fallbackGmeet: gmeet // fallback to provided link if calendar event fails
-    });
-
-    // 3. Save to MongoDB
+    // 3. Save to MongoDB (meet link is generated 10 minutes before meeting in the cron job)
     const meeting = await Meeting.create({
       userName,
       userEmail,
       selectedService,
       userDate: new Date(userDate),
-      partnerName,
       partnerEmail,
-      gmeetLink: realGmeetLink
-    });
-
-    // 4. Save to Google Sheets (Async - don't block response)
-    googleService.appendToSheet({
-      userName,
-      userEmail,
-      selectedService,
-      userDate,
       partnerName,
-      partnerEmail,
-      gmeetLink: realGmeetLink
+      gmeetLink: null
     });
 
     const subject = `Meeting Invitation Registered - ${userName} & ${partnerName}`;
@@ -245,13 +223,13 @@ const partnershipController = {
           
           <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #fff9e6; border-radius: 8px; border: 1px solid #ffeeba;">
             <p style="margin: 0; color: #856404; font-weight: bold;">
-              The official Google Meet link will be sent to your email 30 minutes before the meeting starts.
+              The official Google Meet link will be sent to your email 10 minutes before the meeting starts.
             </p>
             <p style="margin: 10px 0 0 0; font-size: 13px; color: #856404;">
               Please keep an eye on your inbox!
             </p>
           </div>
-
+ 
           <p style="font-size: 13px; color: #666; font-style: italic;">
             Note: This meeting has been registered in our system. A calendar invitation has also been sent to your email.
           </p>

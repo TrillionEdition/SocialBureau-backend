@@ -72,9 +72,14 @@ const appendToSheet = async (data) => {
  */
 const createCalendarEvent = async (data) => {
   try {
+    const cleanUser = data.userName ? data.userName.replace(/[^a-zA-Z0-9]/g, "") : "User";
+    const cleanPartner = data.partnerName ? data.partnerName.replace(/[^a-zA-Z0-9]/g, "") : "Partner";
+    const uniqueTime = data.userDate ? new Date(data.userDate).getTime() : Date.now();
+    const jitsiFallback = `https://meet.jit.si/SocialBureau-${cleanUser}-${cleanPartner}-${uniqueTime}`;
+
     if (!process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || !process.env.GOOGLE_PRIVATE_KEY) {
       console.error("❌ Missing Google credentials");
-      return "https://meet.google.com/new"; // safe fallback
+      return jitsiFallback;
     }
 
     const startTime = new Date(data.userDate);
@@ -138,7 +143,7 @@ Partner Email: ${data.partnerEmail}
     // STEP 4: Final validation
     if (!meetLink) {
       console.error("❌ Meet link not generated");
-      return "https://meet.google.com/new"; // SAFE fallback
+      return jitsiFallback;
     }
 
     console.log("✅ REAL Meet link:", meetLink);
@@ -146,7 +151,10 @@ Partner Email: ${data.partnerEmail}
 
   } catch (error) {
     console.error("❌ Calendar error:", error.message);
-    return "https://meet.google.com/new"; // SAFE fallback
+    const cleanUser = data.userName ? data.userName.replace(/[^a-zA-Z0-9]/g, "") : "User";
+    const cleanPartner = data.partnerName ? data.partnerName.replace(/[^a-zA-Z0-9]/g, "") : "Partner";
+    const uniqueTime = data.userDate ? new Date(data.userDate).getTime() : Date.now();
+    return `https://meet.jit.si/SocialBureau-${cleanUser}-${cleanPartner}-${uniqueTime}`;
   }
 };
 
