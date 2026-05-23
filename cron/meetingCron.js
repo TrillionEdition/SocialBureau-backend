@@ -1,18 +1,20 @@
 const cron = require("node-cron");
 const Meeting = require("../models/meetingModel");
 const sendMail = require("../utils/sendMail");
+const googleService = require("../services/googleService");
 
-// Run every 10 minutes to check for upcoming meetings
-cron.schedule("*/10 * * * *", async () => {
+// Run every minute to check for upcoming meetings
+cron.schedule("* * * * *", async () => {
   console.log("🕒 Running Meeting Reminder Cron...");
   
   try {
     const now = new Date();
-    const thirtyFiveMinutesFromNow = new Date(now.getTime() + 35 * 60 * 1000);
+    const twelveMinutesFromNow = new Date(now.getTime() + 12 * 60 * 1000);
+    const pastFiveMinutes = new Date(now.getTime() - 5 * 60 * 1000);
     
-    // Find meetings starting in the next 35 minutes that haven't had the link sent
+    // Find meetings starting in the next 12 minutes (and not older than 5 minutes ago) that haven't had the link sent
     const upcomingMeetings = await Meeting.find({
-      userDate: { $lte: thirtyFiveMinutesFromNow, $gt: now },
+      userDate: { $lte: twelveMinutesFromNow, $gt: pastFiveMinutes },
       linkSent: false,
       status: "scheduled"
     });
@@ -20,6 +22,38 @@ cron.schedule("*/10 * * * *", async () => {
     console.log(`🔍 Found ${upcomingMeetings.length} upcoming meetings to send links for.`);
 
     for (const meeting of upcomingMeetings) {
+      console.log(`🚀 Generating meeting link for: ${meeting.userName} & ${meeting.partnerName}...`);
+      
+      let meetLink;
+      try {
+        meetLink = await googleService.createCalendarEvent({
+          userName: meeting.userName,
+          userEmail: meeting.userEmail,
+          selectedService: meeting.selectedService,
+          userDate: meeting.userDate.toISOString(),
+          partnerName: meeting.partnerName,
+          partnerEmail: meeting.partnerEmail
+        });
+      } catch (err) {
+        console.error("❌ Error generating meeting link in cron, building Jitsi fallback:", err);
+        const cleanUser = meeting.userName ? meeting.userName.replace(/[^a-zA-Z0-9]/g, "") : "User";
+        const cleanPartner = meeting.partnerName ? meeting.partnerName.replace(/[^a-zA-Z0-9]/g, "") : "Partner";
+        meetLink = `https://meet.jit.si/SocialBureau-${cleanUser}-${cleanPartner}-${new Date(meeting.userDate).getTime()}`;
+      }
+
+      meeting.gmeetLink = meetLink;
+
+      // Save to Google Sheets (Async)
+      googleService.appendToSheet({
+        userName: meeting.userName,
+        userEmail: meeting.userEmail,
+        selectedService: meeting.selectedService,
+        userDate: meeting.userDate.toISOString(),
+        partnerName: meeting.partnerName,
+        partnerEmail: meeting.partnerEmail,
+        gmeetLink: meetLink
+      });
+
       const subject = `URGENT: Your Meeting Link - ${meeting.userName} & ${meeting.partnerName}`;
       
       const html = `
@@ -30,13 +64,13 @@ cron.schedule("*/10 * * * *", async () => {
           </div>
           <div style="padding: 30px; color: #333; line-height: 1.6;">
             <p>Hello <strong>${meeting.userName}</strong>,</p>
-            <p>Your meeting with <strong>${meeting.partnerName}</strong> is starting in about 30 minutes. Here is your Google Meet link:</p>
+            <p>Your meeting with <strong>${meeting.partnerName}</strong> is starting in about 10 minutes. Here is your unique, shared meeting link:</p>
             
             <div style="text-align: center; margin: 30px 0;">
-              <a href="${meeting.gmeetLink}" style="background-color: #111; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 30px; font-weight: bold; display: inline-block;">
-                JOIN GOOGLE MEET NOW
+              <a href="${meetLink}" style="background-color: #111; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 30px; font-weight: bold; display: inline-block;">
+                JOIN MEETING NOW
               </a>
-              <p style="margin-top: 10px; font-size: 12px; color: #666;">Link: ${meeting.gmeetLink}</p>
+              <p style="margin-top: 10px; font-size: 12px; color: #666;">Link: ${meetLink}</p>
             </div>
 
             <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">

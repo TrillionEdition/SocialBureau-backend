@@ -63,7 +63,11 @@ const syncClickupName = async (user) => {
     }
 
     if (clickupUsername) {
-      user.name = clickupUsername;
+      if (user.role === 'client' && user.name) {
+        console.log(`ℹ️ Preserving manually configured client name: ${user.name} (ClickUp username: ${clickupUsername})`);
+      } else {
+        user.name = clickupUsername;
+      }
     }
   } catch (err) {
     console.error("⚠️ Failed to sync ClickUp name:", err.response?.data || err.message);

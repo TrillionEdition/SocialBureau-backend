@@ -23,6 +23,11 @@ const clickupContext = async (req, res, next) => {
 
 const authWithContext = [userAuthentication, clickupContext];
 
+// Health check endpoint (no auth required - for debugging)
+clickupRoutes.get('/health', (req, res) => {
+  res.json({ status: 'ok', message: 'ClickUp API is running' });
+});
+
 clickupRoutes.get('/tasks', authWithContext, clickupController.getTasks);
 clickupRoutes.get('/tasks/:taskId', authWithContext, clickupController.getTaskById);
 clickupRoutes.get('/time', authWithContext, clickupController.getTime);

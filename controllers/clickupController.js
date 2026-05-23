@@ -299,18 +299,32 @@ const clickupController = {
           });
           console.log("✅ File upload using custom token successful!");
         } catch (err) {
-          console.error("⚠️ Custom token upload failed, falling back to global token...", err.response?.data || err.message);
+          console.error("❌ Custom token upload failed:", err.response?.data || err.message);
+          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+          return res.status(err.response?.status || 500).json({
+            success: false,
+            message: "Failed to upload file using your personal ClickUp token. Please verify your token and list/view permissions in ClickUp.",
+            error: err.response?.data || err.message
+          });
         }
-      }
-
-      if (!response) {
+      } else {
         console.log("🔄 Uploading file using global token...");
-        response = await axios.post(url, form, {
-          headers: {
-            ...form.getHeaders(),
-            Authorization: CLICKUP_TOKEN,
-          },
-        });
+        try {
+          response = await axios.post(url, form, {
+            headers: {
+              ...form.getHeaders(),
+              Authorization: CLICKUP_TOKEN,
+            },
+          });
+        } catch (err) {
+          console.error("❌ Global token upload failed:", err.response?.data || err.message);
+          if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+          return res.status(err.response?.status || 500).json({
+            success: false,
+            message: "Failed to upload file to ClickUp using global token",
+            error: err.response?.data || err.message
+          });
+        }
       }
 
       console.log("✅ ClickUp Upload Success:", response.data);
@@ -330,9 +344,6 @@ const clickupController = {
           : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
 
         console.log(`📝 Auto-posting native rich attachment comment to ${isView ? 'View' : 'Task'} [${viewId}]`);
-
-        // Format a clean, attributed sender tag only if using global token
-        const hasCustomToken = config.clickupToken && config.clickupToken !== CLICKUP_TOKEN;
 
         let commentBody = {};
 
@@ -414,13 +425,19 @@ const clickupController = {
             });
             console.log("✅ Auto-posted rich attachment comment successfully using custom token!");
           } catch (err) {
-            console.error("⚠️ Custom token auto-post failed, falling back to global token...", err.response?.data || err.message);
+            console.error("❌ Custom token auto-post failed:", err.response?.data || err.message);
+            return res.status(err.response?.status || 500).json({
+              success: false,
+              message: "Failed to auto-post attachment comment using your personal ClickUp token. Please verify your token and permissions.",
+              error: err.response?.data || err.message
+            });
           }
-        }
-
-        if (!commentRes) {
+        } else {
           console.log("🔄 Auto-posting comment using global token...");
-          
+          // Prepend sender name prefix to identify the sender when using global token
+          if (commentBody.comment && commentBody.comment[0]) {
+            commentBody.comment[0].text = `[${senderName}]: `;
+          }
           await axios.post(commentUrl, commentBody, {
             headers: {
               Authorization: CLICKUP_TOKEN,
@@ -431,6 +448,8 @@ const clickupController = {
         }
       } catch (commentErr) {
         console.error("⚠️ Failed to auto-post rich attachment comment:", commentErr.response?.data || commentErr.message);
+        // Only propagate if custom token is used and it failed outside the nested catch
+        if (hasCustomToken) throw commentErr;
       }
 
       res.json({
@@ -705,15 +724,15 @@ const clickupController = {
       const allStatuses = listRes.data.statuses || [];
 
 
-      const tasks = response.data.tasks.map(task => ({
+      const tasks = (response.data.tasks || []).map(task => ({
         id: task.id,
-        title: task.name,
-        status: task.status.status,
-        statusColor: task.status.color,
+        title: task.name || 'Untitled Task',
+        status: task.status?.status || 'Unknown',
+        statusColor: task.status?.color || '#999',
         deadline: task.due_date ? new Date(parseInt(task.due_date)).toLocaleDateString() : 'No deadline',
         priority: task.priority?.priority || 'none',
         priorityColor: task.priority?.color || '#999',
-        assignees: task.assignees.map(a => ({
+        assignees: (task.assignees || []).map(a => ({
           name: a.username,
           initials: a.initials,
           color: a.color
@@ -798,7 +817,6 @@ const clickupController = {
     }
   }),
 
-
   getTaskActivity: expressAsyncHandler(async (req, res) => {
     try {
       const { taskId } = req.params;
@@ -869,9 +887,6 @@ const clickupController = {
       res.status(500).json({ success: false, error: e.message });
     }
   }),
-
-
-
 
   getTasksById: expressAsyncHandler(async (req, res) => {
     try {
@@ -2196,7 +2211,7 @@ const clickupController = {
           response = await axios.get(url, {
             headers: { Authorization: customToken },
           });
-          console.log("✅ Custom token chat comments fetch successful!");
+          console.log("✅ Custom token chat comments fetch successful!",customToken);
         } catch (err) {
           console.error("⚠️ Custom token comments fetch failed, falling back to global token...", err.message);
         }
@@ -2269,13 +2284,19 @@ const clickupController = {
             comment: response.data
           });
         } catch (err) {
-}
+          console.error("❌ Custom token comment post failed:", err.response?.data || err.message);
+          return res.status(err.response?.status || 500).json({
+            success: false,
+            message: "Failed to post comment using your personal ClickUp token. Please verify your token and list/view permissions in ClickUp.",
+            error: err.response?.data || err.message
+          });
+        }
       }
 
-      console.log("🔄 Posting comment using global token with sender prefix...");
-      const commentTextToSend = `${comment_text}`;
+      // Post using global token fallback with [Sender Name] prefix
+      console.log("🔄 Posting comment using global token...");
       const response = await axios.post(url, {
-        comment_text: commentTextToSend,
+        comment_text: `[${senderName}]: ${comment_text}`,
         notify_all: true
       }, {
         headers: {
@@ -2283,14 +2304,20 @@ const clickupController = {
           'Content-Type': 'application/json'
         },
       });
+      console.log("✅ Posted comment using global token!");
 
       res.json({
         success: true,
         comment: response.data
       });
     } catch (err) {
-          console.error("⚠️ Custom token post failed, falling back to global token...", err.response?.data || err.message);
-        }
+      console.error("❌ postChatComment error:", err.response?.data || err.message);
+      res.status(500).json({
+        success: false,
+        message: "Failed to post comment to ClickUp",
+        error: err.response?.data || err.message
+      });
+    }
   }),
 
   getGeneralActivity: expressAsyncHandler(async (req, res) => {
