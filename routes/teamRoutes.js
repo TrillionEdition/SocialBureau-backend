@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const mongoose = require("mongoose");
 console.log("TEAM ROUTES FILE LOADED SUCCESSFULLY");
 const userAuthentication = require("../middlewares/userAuthentication");
 const TeamMember = require("../models/teamMemberModel");
@@ -22,11 +23,11 @@ router.get("/admin/members", userAuthentication, require("../middlewares/isAdmin
   try {
     const members = await TeamMember.find().populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard",
+      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications",
       populate: [
-        { path: 'tools', select: 'toolName icon url description' },
+        { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },
-        { path: 'achievements', select: 'title description image' }
+        { path: 'achievements', select: 'title description image date' }
       ]
     });
     res.status(200).json({
@@ -63,6 +64,7 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
 
     const {
       email, password, emp_id, phone, doj, rate, clickupId, isEmployee, tools, clients, achievements, coverImage, idCard,
+      hobbies, podcasts, events, innovations, workShowcase, education, certifications,
       slug,
       ...teamMemberData
     } = updateData;
@@ -82,6 +84,11 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
       teamMemberData.slug = finalSlug;
     }
 
+    // Add idCard to teamMemberData if provided
+    if (idCard !== undefined) {
+      teamMemberData.idCard = idCard;
+    }
+
     if (profile.user) {
       const userUpdate = {};
       if (email !== undefined) userUpdate.email = email;
@@ -96,6 +103,38 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
       if (isEmployee !== undefined) userUpdate.isEmployee = isEmployee;
       if (coverImage !== undefined) userUpdate.coverImage = coverImage;
       if (idCard !== undefined) userUpdate.idCard = idCard;
+      if (hobbies !== undefined) userUpdate.hobbies = hobbies;
+      if (education !== undefined) {
+        let parsedEducation = education;
+        if (typeof education === 'string') {
+          try { parsedEducation = JSON.parse(education); } catch (e) { parsedEducation = []; }
+        }
+        userUpdate.education = Array.isArray(parsedEducation) ? parsedEducation : [];
+      }
+      if (certifications !== undefined) {
+        let parsedCertifications = certifications;
+        if (typeof certifications === 'string') {
+          try { parsedCertifications = JSON.parse(certifications); } catch (e) { parsedCertifications = []; }
+        }
+        userUpdate.certifications = Array.isArray(parsedCertifications) ? parsedCertifications : [];
+      }
+      if (podcasts !== undefined) userUpdate.podcasts = podcasts;
+      if (events !== undefined) userUpdate.events = events;
+      if (innovations !== undefined) {
+        let parsedInnovations = innovations;
+        if (typeof innovations === 'string') {
+          try { parsedInnovations = JSON.parse(innovations); } catch (e) { parsedInnovations = []; }
+        }
+        console.log('[PUT /admin/member/:id] Saving innovations:', JSON.stringify(parsedInnovations));
+        userUpdate.innovations = Array.isArray(parsedInnovations) ? parsedInnovations : [];
+      }
+      if (workShowcase !== undefined) {
+        let parsedWorkShowcase = workShowcase;
+        if (typeof workShowcase === 'string') {
+          try { parsedWorkShowcase = JSON.parse(workShowcase); } catch (e) { parsedWorkShowcase = []; }
+        }
+        userUpdate.workShowcase = Array.isArray(parsedWorkShowcase) ? parsedWorkShowcase : [];
+      }
 
       if (tools !== undefined) {
         let toolIds = [];
@@ -105,11 +144,11 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
         }
         if (parsedTools && Array.isArray(parsedTools)) {
           for (const tool of parsedTools) {
-            const { toolName, url, icon, description } = tool || {};
+            const { toolName, url, icon, description, level } = tool || {};
             if (!toolName) continue;
             const updatedTool = await Tool.findOneAndUpdate(
               { toolName },
-              { $set: { url: url || "", icon: icon || "", description: description || "" } },
+              { $set: { url: url || "", icon: icon || "", description: description || "", level: level !== undefined ? Number(level) : 85 } },
               { new: true, upsert: true }
             );
             toolIds.push(updatedTool._id);
@@ -156,13 +195,14 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
         if (parsedAchievements && Array.isArray(parsedAchievements)) {
           await Achievement.deleteMany({ user: profile.user });
           for (const ach of parsedAchievements) {
-            const { title, description, image } = ach || {};
+            const { title, description, image, date } = ach || {};
             if (!title) continue;
             const createdAch = await Achievement.create({
               user: profile.user,
               title: title.trim(),
               description: description || "",
-              image: image || ""
+              image: image || "",
+              date: date || ""
             });
             achievementIds.push(createdAch._id);
           }
@@ -170,7 +210,8 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
         userUpdate.achievements = achievementIds;
       }
 
-      await User.findByIdAndUpdate(profile.user, { $set: userUpdate }, { new: true, runValidators: true });
+      const savedUser = await User.findByIdAndUpdate(profile.user, { $set: userUpdate }, { new: true, runValidators: false });
+      console.log('[PUT /admin/member/:id] Saved user.innovations:', JSON.stringify(savedUser?.innovations));
     }
 
     const updatedProfile = await TeamMember.findByIdAndUpdate(
@@ -179,11 +220,11 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
       { new: true, runValidators: true }
     ).populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard",
+      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications",
       populate: [
-        { path: 'tools', select: 'toolName icon url description' },
+        { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },
-        { path: 'achievements', select: 'title description image' }
+        { path: 'achievements', select: 'title description image date' }
       ]
     });
 
@@ -268,6 +309,11 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       tools,
       clients,
       achievements,
+      hobbies,
+      podcasts,
+      events,
+      innovations,
+      workShowcase,
       slug
     } = req.body;
 
@@ -305,6 +351,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
             if (t.url && existing.url !== t.url) { existing.url = t.url; changed = true; }
             if (t.icon && existing.icon !== t.icon) { existing.icon = t.icon; changed = true; }
             if (t.description && existing.description !== t.description) { existing.description = t.description; changed = true; }
+            if (t.level !== undefined && existing.level !== t.level) { existing.level = Number(t.level); changed = true; }
             if (changed) await existing.save();
             return existing._id;
           }
@@ -313,6 +360,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
             url: t.url,
             icon: t.icon,
             description: t.description,
+            level: t.level !== undefined ? Number(t.level) : 85,
           });
           return created._id;
         })
@@ -376,6 +424,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
             title: ach.title.trim(),
             description: ach.description || "",
             image: ach.image || "",
+            date: ach.date || "",
           });
           return created;
         })
@@ -400,7 +449,12 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       idCard: idCard || undefined,
       tools: toolIds,
       clients: uniqueClientIds,
-      achievements: cleanAchievementIds.map(a => a._id)
+      achievements: cleanAchievementIds.map(a => a._id),
+      hobbies: hobbies || [],
+      podcasts: podcasts || [],
+      events: events || [],
+      innovations: innovations || [],
+      workShowcase: workShowcase || []
     });
 
     // Update user reference in achievements
@@ -432,6 +486,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       image: image || "",
       cardImage: cardImage || "",
       image1: image1 || "",
+      idCard: idCard || "",
       tags: tags || [],
       category: category || [],
       bgColor: bgColor || "#ff3358",
@@ -487,15 +542,31 @@ router.get("/", async (req, res) => {
  */
 router.get("/me", userAuthentication, async (req, res) => {
   try {
-    const profile = await TeamMember.findOne({ user: req.user.id });
+    const profile = await TeamMember.findOne({ user: req.user.id }).populate({
+      path: "user",
+      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications",
+      populate: [
+        { path: 'tools', select: 'toolName icon url description level' },
+        { path: 'clients', select: 'name companyName email website logo status notes' },
+        { path: 'achievements', select: 'title description image date' }
+      ]
+    });
     
     if (!profile) {
+      const populatedUser = await User.findById(req.user.id)
+        .select("email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications")
+        .populate([
+          { path: 'tools', select: 'toolName icon url description level' },
+          { path: 'clients', select: 'name companyName email website logo status notes' },
+          { path: 'achievements', select: 'title description image date' }
+        ]);
       return res.status(200).json({
         success: true,
         data: {
           name: req.user.name,
           role: req.user.role || "",
-          isNew: true
+          isNew: true,
+          user: populatedUser
         }
       });
     }
@@ -518,7 +589,8 @@ router.get("/me", userAuthentication, async (req, res) => {
  */
 router.put("/me", userAuthentication, async (req, res) => {
   try {
-    console.log("Team Profile Update Body:", req.body);
+    console.log("[PUT /me] Body keys:", Object.keys(req.body));
+    console.log("[PUT /me] innovations received:", JSON.stringify(req.body.innovations));
     const {
       name,
       role,
@@ -532,10 +604,43 @@ router.put("/me", userAuthentication, async (req, res) => {
       bgColor,
       hasBakedText,
       socials,
-      isPublic
+      isPublic,
+      // User specific fields
+      coverImage,
+      idCard,
+      location,
+      phone,
+      clickupId,
+      emp_id,
+      doj,
+      rate,
+      tools,
+      clients,
+      achievements,
+      hobbies,
+      podcasts,
+      events,
+      innovations,
+      workShowcase,
+      education,
+      certifications
     } = req.body;
 
     let profile = await TeamMember.findOne({ user: req.user.id });
+
+    // Generate unique slug for new profile if it doesn't have one
+    let generatedSlug = undefined;
+    if (!profile) {
+      let baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+      if (!baseSlug) baseSlug = "member";
+      let finalSlug = baseSlug;
+      let counter = 1;
+      while (await TeamMember.findOne({ slug: finalSlug })) {
+        finalSlug = `${baseSlug}-${counter}`;
+        counter++;
+      }
+      generatedSlug = finalSlug;
+    }
 
     const profileData = {
       user: req.user.id,
@@ -546,13 +651,145 @@ router.put("/me", userAuthentication, async (req, res) => {
       image,
       cardImage,
       image1,
-      tags,
-      category,
+      tags: tags || [],
+      category: category || [],
       bgColor,
       hasBakedText,
-      socials,
-      isPublic
+      socials: socials || { linkedin: "", instagram: "", twitter: "" },
+      isPublic: isPublic !== undefined ? isPublic : false
     };
+
+    if (generatedSlug) {
+      profileData.slug = generatedSlug;
+    }
+
+    // Securely update associated User details
+    const userUpdate = {};
+    if (coverImage !== undefined) userUpdate.coverImage = coverImage;
+    if (idCard !== undefined) userUpdate.idCard = idCard;
+    if (location !== undefined) userUpdate.location = location;
+    if (phone !== undefined) userUpdate.phone = phone;
+    if (clickupId !== undefined) userUpdate.clickupId = clickupId;
+    if (emp_id !== undefined) userUpdate.emp_id = emp_id;
+    if (doj !== undefined) userUpdate.doj = doj ? new Date(doj) : null;
+    if (rate !== undefined) userUpdate.rate = rate;
+    if (hobbies !== undefined) userUpdate.hobbies = hobbies;
+    if (education !== undefined) {
+      let parsedEducation = education;
+      if (typeof education === 'string') {
+        try { parsedEducation = JSON.parse(education); } catch (e) { parsedEducation = []; }
+      }
+      userUpdate.education = Array.isArray(parsedEducation) ? parsedEducation : [];
+    }
+    if (certifications !== undefined) {
+      let parsedCertifications = certifications;
+      if (typeof certifications === 'string') {
+        try { parsedCertifications = JSON.parse(certifications); } catch (e) { parsedCertifications = []; }
+      }
+      userUpdate.certifications = Array.isArray(parsedCertifications) ? parsedCertifications : [];
+    }
+    if (podcasts !== undefined) userUpdate.podcasts = podcasts;
+    if (events !== undefined) userUpdate.events = events;
+    if (innovations !== undefined) {
+      let parsedInnovations = innovations;
+      if (typeof innovations === 'string') {
+        try { parsedInnovations = JSON.parse(innovations); } catch (e) { parsedInnovations = []; }
+      }
+      console.log('[PUT /me] Saving innovations:', JSON.stringify(parsedInnovations));
+      userUpdate.innovations = Array.isArray(parsedInnovations) ? parsedInnovations : [];
+    }
+    if (workShowcase !== undefined) {
+      let parsedWorkShowcase = workShowcase;
+      if (typeof workShowcase === 'string') {
+        try { parsedWorkShowcase = JSON.parse(workShowcase); } catch (e) { parsedWorkShowcase = []; }
+      }
+      userUpdate.workShowcase = Array.isArray(parsedWorkShowcase) ? parsedWorkShowcase : [];
+    }
+
+    // Relational: Tools
+    if (tools !== undefined) {
+      let toolIds = [];
+      let parsedTools = tools;
+      if (typeof tools === 'string') {
+        try { parsedTools = JSON.parse(tools); } catch (e) { parsedTools = []; }
+      }
+      if (parsedTools && Array.isArray(parsedTools)) {
+        for (const tool of parsedTools) {
+          const { toolName, url, icon, description: tDesc, level } = tool || {};
+          if (!toolName) continue;
+          const updatedTool = await Tool.findOneAndUpdate(
+            { toolName },
+            { $set: { url: url || "", icon: icon || "", description: tDesc || "", level: level !== undefined ? Number(level) : 85 } },
+            { new: true, upsert: true }
+          );
+          toolIds.push(updatedTool._id);
+        }
+      }
+      userUpdate.tools = [...new Set(toolIds.map(id => id.toString()))];
+    }
+
+    // Relational: Clients
+    if (clients !== undefined) {
+      let clientIds = [];
+      let parsedClients = clients;
+      if (typeof clients === 'string') {
+        try { parsedClients = JSON.parse(clients); } catch (e) { parsedClients = []; }
+      }
+      if (parsedClients && Array.isArray(parsedClients)) {
+        for (const clientData of parsedClients) {
+          const { name: cName, companyName, email: cEmail, phone: cPhone, website, logo, status, notes } = clientData || {};
+          if (!cName) continue;
+          const idQuery = {
+            $or: [
+              cEmail ? { email: cEmail } : null,
+              website ? { website } : null,
+              { name: cName }
+            ].filter(Boolean)
+          };
+          const client = await Client.findOneAndUpdate(
+            idQuery,
+            { $set: { name: cName, companyName: companyName || "", email: cEmail || "", phone: cPhone || "", website: website || "", logo: logo || "", notes: notes || "", status: status || "active" } },
+            { new: true, upsert: true }
+          );
+          clientIds.push(client._id);
+        }
+      }
+      userUpdate.clients = [...new Set(clientIds.map(id => id.toString()))];
+    }
+
+    // Relational: Achievements / Milestones
+    if (achievements !== undefined) {
+      const Achievement = require("../models/achievementModel");
+      let achievementIds = [];
+      let parsedAchievements = achievements;
+      if (typeof achievements === 'string') {
+        try { parsedAchievements = JSON.parse(achievements); } catch (e) { parsedAchievements = []; }
+      }
+      if (parsedAchievements && Array.isArray(parsedAchievements)) {
+        await Achievement.deleteMany({ user: req.user.id });
+        for (const ach of parsedAchievements) {
+          const { title, description: aDesc, image: aImg, date } = ach || {};
+          if (!title) continue;
+          const createdAch = await Achievement.create({
+            user: req.user.id,
+            title: title.trim(),
+            description: aDesc || "",
+            image: aImg || "",
+            date: date || ""
+          });
+          achievementIds.push(createdAch._id);
+        }
+      }
+      userUpdate.achievements = achievementIds;
+    }
+
+    try {
+      const savedUser = await User.findByIdAndUpdate(req.user.id, { $set: userUpdate }, { new: true, runValidators: false });
+      console.log('[PUT /me] Saved user.innovations:', JSON.stringify(savedUser?.innovations));
+    } catch (saveErr) {
+      console.error('[PUT /me] Error saving userUpdate:', saveErr.message, 'userUpdate.innovations:', JSON.stringify(userUpdate.innovations));
+      throw saveErr;
+    }
 
     if (profile) {
       profile = await TeamMember.findOneAndUpdate(
@@ -564,9 +801,20 @@ router.put("/me", userAuthentication, async (req, res) => {
       profile = await TeamMember.create(profileData);
     }
 
+    // Re-populate everything before returning
+    const updatedProfile = await TeamMember.findById(profile._id).populate({
+      path: "user",
+      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications",
+      populate: [
+        { path: 'tools', select: 'toolName icon url description level' },
+        { path: 'clients', select: 'name companyName email website logo status notes' },
+        { path: 'achievements', select: 'title description image date' }
+      ]
+    });
+
     res.status(200).json({
       success: true,
-      data: profile
+      data: updatedProfile
     });
   } catch (error) {
     res.status(500).json({
@@ -606,10 +854,11 @@ router.get("/member/slug/:slug", async (req, res) => {
     const { slug } = req.params;
     const member = await TeamMember.findOne({ slug }).populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients coverImage idCard",
+      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications",
       populate: [
-        { path: 'tools', select: 'toolName icon url description' },
-        { path: 'clients', select: 'name companyName email website logo status notes' }
+        { path: 'tools', select: 'toolName icon url description level' },
+        { path: 'clients', select: 'name companyName email website logo status notes' },
+        { path: 'achievements', select: 'title description image date' }
       ]
     });
     if (!member) {

@@ -21,6 +21,7 @@ const teamMemberSchema = new mongoose.Schema(
     image: String,
     cardImage: String,
     image1: String,
+    idCard: String,
     tags: [String],
     category: [String],
     bgColor: {

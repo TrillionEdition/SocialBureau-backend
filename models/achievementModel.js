@@ -21,6 +21,10 @@ const achievementSchema = new mongoose.Schema(
     image: {
       type: String,
     },
+    date: {
+      type: String,
+      default: "",
+    },
   },
   {
     timestamps: true,
