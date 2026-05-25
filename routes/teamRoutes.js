@@ -299,6 +299,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       bgColor,
       hasBakedText,
       socials,
+      consultations,
       isPublic,
       // NEW FIELDS
       clickupId,
@@ -492,6 +493,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       bgColor: bgColor || "#ff3358",
       hasBakedText: hasBakedText !== undefined ? hasBakedText : true,
       socials: socials || { linkedin: "", instagram: "", twitter: "" },
+      consultations: consultations || { price30Min: "", price60Min: "", priceFullDay: "" },
       isPublic: isPublic !== undefined ? isPublic : false,
       slug: finalSlug
     });
@@ -604,6 +606,7 @@ router.put("/me", userAuthentication, async (req, res) => {
       bgColor,
       hasBakedText,
       socials,
+      consultations,
       isPublic,
       // User specific fields
       coverImage,
@@ -656,6 +659,7 @@ router.put("/me", userAuthentication, async (req, res) => {
       bgColor,
       hasBakedText,
       socials: socials || { linkedin: "", instagram: "", twitter: "" },
+      consultations: consultations || { price30Min: "", price60Min: "", priceFullDay: "" },
       isPublic: isPublic !== undefined ? isPublic : false
     };
 

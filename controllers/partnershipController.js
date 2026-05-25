@@ -180,7 +180,25 @@ const partnershipController = {
       });
     }
 
-    // 3. Save to MongoDB (meet link is generated 10 minutes before meeting in the cron job)
+    // 3. Generate the meeting link immediately (using Google Calendar with Jitsi fallback)
+    let meetLink;
+    try {
+      meetLink = await googleService.createCalendarEvent({
+        userName,
+        userEmail,
+        selectedService,
+        userDate: new Date(userDate).toISOString(),
+        partnerName,
+        partnerEmail
+      });
+    } catch (err) {
+      console.error("❌ Error generating meeting link during scheduling:", err);
+      const cleanUser = userName ? userName.replace(/[^a-zA-Z0-9]/g, "") : "User";
+      const cleanPartner = partnerName ? partnerName.replace(/[^a-zA-Z0-9]/g, "") : "Partner";
+      meetLink = `https://meet.jit.si/SocialBureau-${cleanUser}-${cleanPartner}-${new Date(userDate).getTime()}`;
+    }
+
+    // 4. Save to MongoDB
     const meeting = await Meeting.create({
       userName,
       userEmail,
@@ -188,7 +206,8 @@ const partnershipController = {
       userDate: new Date(userDate),
       partnerEmail,
       partnerName,
-      gmeetLink: null
+      gmeetLink: meetLink,
+      linkSent: true // Mark as true so the cron job doesn't send a duplicate link email
     });
 
     const subject = `Meeting Invitation Registered - ${userName} & ${partnerName}`;
@@ -221,13 +240,17 @@ const partnershipController = {
             </table>
           </div>
           
-          <div style="text-align: center; margin: 30px 0; padding: 20px; background-color: #fff9e6; border-radius: 8px; border: 1px solid #ffeeba;">
-            <p style="margin: 0; color: #856404; font-weight: bold;">
-              The official Google Meet link will be sent to your email 10 minutes before the meeting starts.
+          <div style="text-align: center; margin: 30px 0; padding: 25px; background-color: #f0fdf4; border-radius: 8px; border: 1px solid #bbf7d0;">
+            <p style="margin: 0; color: #166534; font-weight: bold; font-size: 16px;">
+              Your Meeting Link is Ready!
             </p>
-            <p style="margin: 10px 0 0 0; font-size: 13px; color: #856404;">
-              Please keep an eye on your inbox!
+            <p style="margin: 8px 0 20px 0; font-size: 13px; color: #166534;">
+              You can join the session immediately or at the scheduled time using the button below:
             </p>
+            <a href="${meetLink}" style="background-color: #15803d; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 30px; font-weight: bold; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+              JOIN SESSION NOW
+            </a>
+            <p style="margin-top: 12px; font-size: 11px; color: #166534; word-break: break-all;">Link: ${meetLink}</p>
           </div>
  
           <p style="font-size: 13px; color: #666; font-style: italic;">
@@ -240,6 +263,8 @@ const partnershipController = {
       </div>
     `;
 
+    // Send emails in a non-blocking way so SMTP issues do not crash the registration flow
+    let emailError = null;
     try {
       // Send to partner
       await sendMail({
@@ -256,23 +281,25 @@ const partnershipController = {
       });
 
       // Send to Admin
-      await sendMail({
-        to: process.env.MAIL_USER,
-        subject: `[NEW MEETING] ${userName} - ${selectedService}`,
-        html: html,
-      });
-
-      res.status(200).json({
-        success: true,
-        message: "Meeting scheduled and emails sent successfully",
-        gmeetLink: realGmeetLink,
-        meetingId: meeting._id
-      });
+      if (process.env.MAIL_USER) {
+        await sendMail({
+          to: process.env.MAIL_USER,
+          subject: `[NEW MEETING] ${userName} - ${selectedService}`,
+          html: html,
+        });
+      }
     } catch (error) {
-      console.error("Error sending schedule email:", error);
-      res.status(500);
-      throw new Error("Failed to send meeting emails");
+      console.error("⚠️ Error sending schedule emails (non-blocking):", error);
+      emailError = error.message;
     }
+
+    res.status(200).json({
+      success: true,
+      message: "Meeting scheduled successfully",
+      emailError: emailError,
+      gmeetLink: meeting.gmeetLink,
+      meetingId: meeting._id
+    });
   }),
   
   // Upload Image to Cloudflare R2

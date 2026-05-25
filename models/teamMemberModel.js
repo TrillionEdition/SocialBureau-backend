@@ -37,6 +37,11 @@ const teamMemberSchema = new mongoose.Schema(
       instagram: { type: String, default: "" },
       twitter: { type: String, default: "" }
     },
+    consultations: {
+      price30Min: { type: String, default: "" },
+      price60Min: { type: String, default: "" },
+      priceFullDay: { type: String, default: "" }
+    },
     isPublic: {
       type: Boolean,
       default: false
