@@ -40,11 +40,13 @@ exports.updateMyProfile = async (req, res) => {
       image,
       cardImage,
       image1,
+      idCard,
       tags,
       category,
       bgColor,
       hasBakedText,
-      socials
+      socials,
+      consultations
     } = req.body;
 
     let profile = await TeamMember.findOne({ user: req.user._id });
@@ -60,11 +62,13 @@ exports.updateMyProfile = async (req, res) => {
           image,
           cardImage,
           image1,
+          idCard,
           tags,
           category,
           bgColor,
           hasBakedText,
-          socials
+          socials,
+          consultations
         },
         { new: true, runValidators: true }
       );
@@ -78,11 +82,13 @@ exports.updateMyProfile = async (req, res) => {
         image,
         cardImage,
         image1,
+        idCard,
         tags,
         category,
         bgColor,
         hasBakedText,
-        socials
+        socials,
+        consultations
       });
     }
 

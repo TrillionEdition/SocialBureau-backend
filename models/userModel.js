@@ -154,6 +154,61 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    hobbies: [String],
+    education: [
+      {
+        degree: String,
+        institution: String,
+        year: String,
+        grade: String
+      }
+    ],
+    certifications: [
+      {
+        name: String,
+        issuedBy: String,
+        year: String,
+        credentialUrl: String
+      }
+    ],
+    podcasts: [
+      {
+        episodeNo: Number,
+        title: String,
+        duration: String,
+        url: String,
+        host: { type: String, default: "Sham SK" }
+      }
+    ],
+    events: [
+      {
+        date: String,
+        month: String,
+        title: String,
+        details: String,
+        category: { type: String, default: "purple" }
+      }
+    ],
+    innovations: [
+      {
+        type: { type: String, enum: ["INNOVATION", "CASE STUDY", "INSIGHT"], default: "INNOVATION" },
+        date: String,
+        title: String,
+        content: String,
+        url: String,
+        likes: { type: Number, default: 0 },
+        comments: { type: Number, default: 0 }
+      }
+    ],
+    workShowcase: [
+      {
+        category: String,
+        title: String,
+        description: String,
+        images: [String],
+        link: String
+      }
+    ],
   },
   {
     timestamps: true,

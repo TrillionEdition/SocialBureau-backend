@@ -21,6 +21,7 @@ const teamMemberSchema = new mongoose.Schema(
     image: String,
     cardImage: String,
     image1: String,
+    idCard: String,
     tags: [String],
     category: [String],
     bgColor: {
@@ -35,6 +36,11 @@ const teamMemberSchema = new mongoose.Schema(
       linkedin: { type: String, default: "" },
       instagram: { type: String, default: "" },
       twitter: { type: String, default: "" }
+    },
+    consultations: {
+      price30Min: { type: String, default: "" },
+      price60Min: { type: String, default: "" },
+      priceFullDay: { type: String, default: "" }
     },
     isPublic: {
       type: Boolean,

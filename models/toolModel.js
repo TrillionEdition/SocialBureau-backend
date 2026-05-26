@@ -16,6 +16,7 @@ const toolSchema = new mongoose.Schema(
     },
     icon: { type: String, trim: true },
     description: { type: String, trim: true },
+    level: { type: Number, default: 85 },
   },
   {
     timestamps: true,
