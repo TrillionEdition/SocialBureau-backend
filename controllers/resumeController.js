@@ -1,4 +1,5 @@
 const expressAsyncHandler = require('express-async-handler');
+const ResumeDraft = require('../models/resumeModel');
 const pdfParse = require('pdf-parse');
 const axios = require('axios');
 const {
@@ -620,16 +621,30 @@ const saveDraft = expressAsyncHandler(async (req, res) => {
       return sendError(res, 400, 'User ID and resume data are required');
     }
 
-    // In a real implementation, save to database
-    // For now, return success
-    return sendSuccess(res, {
-      id: Date.now(),
-      userId,
-      name,
-      data,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    }, 'Draft saved successfully');
+    // If a file was uploaded, its location is set by the Cloudflare upload middleware
+    let resumeUrl = '';
+    if (req.file && req.file.location) {
+      resumeUrl = req.file.location;
+    }
+
+    // Save to database
+    let parsedData = data;
+    if (typeof data === 'string') {
+        try {
+            parsedData = JSON.parse(data);
+        } catch (e) {
+            console.error('Failed to parse data', e);
+        }
+    }
+
+    const draft = await ResumeDraft.create({
+        userId,
+        name: name || 'Untitled Resume',
+        data: parsedData,
+        resumeUrl
+    });
+
+    return sendSuccess(res, draft, 'Draft saved successfully');
   } catch (error) {
     console.error('Save draft error:', error);
     return sendError(res, 500, 'Failed to save draft', error.message);
@@ -647,9 +662,8 @@ const getDrafts = expressAsyncHandler(async (req, res) => {
       return sendError(res, 400, 'User ID is required');
     }
 
-    // In a real implementation, fetch from database
-    // For now, return empty array
-    return sendSuccess(res, [], 'Drafts retrieved successfully');
+    const drafts = await ResumeDraft.find({ userId }).sort({ createdAt: -1 });
+    return sendSuccess(res, drafts, 'Drafts retrieved successfully');
   } catch (error) {
     console.error('Get drafts error:', error);
     return sendError(res, 500, 'Failed to fetch drafts', error.message);
@@ -667,11 +681,27 @@ const deleteDraft = expressAsyncHandler(async (req, res) => {
       return sendError(res, 400, 'Draft ID is required');
     }
 
-    // In a real implementation, delete from database
+    await ResumeDraft.findByIdAndDelete(draftId);
     return sendSuccess(res, { deleted: true }, 'Draft deleted successfully');
   } catch (error) {
     console.error('Delete draft error:', error);
     return sendError(res, 500, 'Failed to delete draft', error.message);
+  }
+});
+
+/**
+ * Admin: Get all resumes
+ */
+const getAdminResumes = expressAsyncHandler(async (req, res) => {
+  try {
+    const resumes = await ResumeDraft.find()
+        .populate('userId', 'email fullName')
+        .sort({ createdAt: -1 });
+    
+    return sendSuccess(res, resumes, 'Resumes retrieved successfully');
+  } catch (error) {
+    console.error('Get admin resumes error:', error);
+    return sendError(res, 500, 'Failed to fetch resumes', error.message);
   }
 });
 
@@ -1234,6 +1264,7 @@ module.exports = {
   saveDraft,
   getDrafts,
   deleteDraft,
+  getAdminResumes,
   analyzeResumeMatch,
   generateImprovements,
   calculateResumeScore,

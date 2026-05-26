@@ -76,6 +76,10 @@ const ResumeDraftSchema = new mongoose.Schema(
     viewCount: {
       type: Number,
       default: 0
+    },
+    resumeUrl: {
+      type: String,
+      default: ''
     }
   },
   {

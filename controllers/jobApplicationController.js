@@ -39,20 +39,17 @@ const jobApplicationController = {
 
             let resumeUrl = "";
             if (resumeFile) {
-                // Use local file path as requested
-                const host = req.get('host');
-                const protocol = req.protocol;
-                // Normalize path for URL (replace backslashes with forward slashes)
-                const relativePath = resumeFile.path.replace(/\\/g, '/');
-                resumeUrl = `${protocol}://${host}/${relativePath}`;
+                // Use Cloudflare R2 URL
+                resumeUrl = resumeFile.location || "";
 
-                // Optional: Run ATS analysis (local version)
+                // Optional: Run ATS analysis
                 try {
-                    const fs = require('fs');
-                    const fileBuffer = fs.readFileSync(resumeFile.path);
-                    const resumeText = await atsEngine.extractTextFromFile(fileBuffer, resumeFile.mimetype);
-                    const fullJd = `${job.title || ""} ${job.description || ""} ${job.about || ""}`;
-                    req.atsResult = atsEngine.calculateScore(resumeText, fullJd);
+                    const fileBuffer = resumeFile.buffer;
+                    if (fileBuffer) {
+                        const resumeText = await atsEngine.extractTextFromFile(fileBuffer, resumeFile.mimetype);
+                        const fullJd = `${job.title || ""} ${job.description || ""} ${job.about || ""}`;
+                        req.atsResult = atsEngine.calculateScore(resumeText, fullJd);
+                    }
                 } catch (e) {
                     console.warn("ATS analysis skipped:", e.message);
                 }
