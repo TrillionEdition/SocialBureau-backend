@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
+const path = require('path');
 
 dotenv.config();
 
@@ -10,18 +11,15 @@ mongoose.connect(mongoUri)
   .then(async () => {
     console.log("Connected successfully!");
     
-    const TeamMember = require('./models/teamMemberModel');
-    require('./models/userModel'); // load user model
+    const User = require('../models/userModel');
+    const TeamMember = require('../models/teamMemberModel');
     
     const members = await TeamMember.find({}).populate('user');
     console.log(`Found ${members.length} team members:`);
     members.forEach(m => {
-      console.log(`- Name: ${m.name}, Slug: ${m.slug}`);
+      console.log(`- Name: ${m.name}, Slug: ${m.slug}, Role: ${m.role}`);
       if (m.user) {
-        console.log(`  User ID: ${m.user._id}`);
-        console.log(`  Innovations:`, JSON.stringify(m.user.innovations, null, 2));
-      } else {
-        console.log(`  No associated user object found.`);
+        console.log(`  ClickUp ID: ${m.user.clickupId}, ClickUp List ID: ${m.user.clickupListId}`);
       }
     });
     

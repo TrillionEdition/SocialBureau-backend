@@ -10,8 +10,8 @@ mongoose.connect(mongoUri)
   .then(async () => {
     console.log("Connected successfully!");
     
-    const TeamMember = require('./models/teamMemberModel');
-    const User = require('./models/userModel');
+    const TeamMember = require('../models/teamMemberModel');
+    const User = require('../models/userModel');
     
     const member = await TeamMember.findOne({ slug: 'shamsk' }).populate('user');
     if (!member || !member.user) {

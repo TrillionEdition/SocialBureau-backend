@@ -10,8 +10,8 @@ mongoose.connect(mongoUri)
   .then(async () => {
     console.log("Connected successfully!");
     
-    const TeamMember = require('./models/teamMemberModel');
-    const User = require('./models/userModel');
+    const TeamMember = require('../models/teamMemberModel');
+    const User = require('../models/userModel');
     
     const members = await TeamMember.find({}).populate('user');
     if (members.length === 0) {

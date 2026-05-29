@@ -11,13 +11,13 @@ mongoose.connect(mongoUri)
     console.log("Connected successfully!");
     
     // Register schemas
-    require('./models/toolModel');
-    require('./models/clientsModel');
-    require('./models/reviewModel');
-    require('./models/achievementModel');
+    require('../models/toolModel');
+    require('../models/clientsModel');
+    require('../models/reviewModel');
+    require('../models/achievementModel');
     
-    const TeamMember = require('./models/teamMemberModel');
-    const User = require('./models/userModel');
+    const TeamMember = require('../models/teamMemberModel');
+    const User = require('../models/userModel');
     
     const slug = 'reshma-vijayan';
     const member = await TeamMember.findOne({ slug }).populate({
