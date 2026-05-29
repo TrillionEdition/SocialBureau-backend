@@ -22,69 +22,77 @@ const r2 = new S3Client({
 const jobApplicationController = {
     // APPLY TO JOB (Updated for R2 and Internal Form)
     applyToJob: async (req, res) => {
-        const { jobId, candidateName, candidateEmail, candidatePhone, coverLetter, userId } = req.body;
-        const resumeFile = req.file;
+    const { jobId, candidateName, candidateEmail, candidatePhone, coverLetter, userId } = req.body;
+    const resumeFile = req.file;
+    try {
+        if (!mongoose.Types.ObjectId.isValid(jobId)) {
+            return res.status(400).json({ message: "Invalid Job ID format." });
+        }
 
-        try {
-            if (!mongoose.Types.ObjectId.isValid(jobId)) {
-                return res.status(400).json({ message: "Invalid Job ID format." });
+        // ✅ Cache buffer BEFORE anything else consumes it
+        const resumeBuffer = resumeFile?.buffer ? Buffer.from(resumeFile.buffer) : null;
+
+        // Check if job exists in any model — collapse into ONE query chain
+        let job = await Job.findById(jobId)
+            ?? await JobPosting.findById(jobId)
+            ?? await ExternalJob.findById(jobId);
+
+        if (!job) return res.status(404).json({ message: "Job not found" });
+
+        let resumeUrl = "";
+        if (resumeFile) {
+            resumeUrl = resumeFile.location || "";
+
+            if (!resumeUrl) {
+                console.error("❌ resumeFile.location is empty. Upload may have failed silently.");
             }
 
-            // Check if job exists in any model
-            let job = await Job.findById(jobId);
-            if (!job) job = await JobPosting.findById(jobId);
-            if (!job) job = await ExternalJob.findById(jobId);
-            
-            if (!job) return res.status(404).json({ message: "Job not found" });
-
-            let resumeUrl = "";
-            if (resumeFile) {
-                // Use local file path as requested
-                const host = req.get('host');
-                const protocol = req.protocol;
-                // Normalize path for URL (replace backslashes with forward slashes)
-                const relativePath = resumeFile.path.replace(/\\/g, '/');
-                resumeUrl = `${protocol}://${host}/${relativePath}`;
-
-                // Optional: Run ATS analysis (local version)
+            // ✅ Use cached buffer for ATS — doesn't depend on upload state
+            if (resumeBuffer) {
                 try {
-                    const fs = require('fs');
-                    const fileBuffer = fs.readFileSync(resumeFile.path);
-                    const resumeText = await atsEngine.extractTextFromFile(fileBuffer, resumeFile.mimetype);
+                    const resumeText = await atsEngine.extractTextFromFile(
+                        resumeBuffer,
+                        resumeFile.mimetype
+                    );
                     const fullJd = `${job.title || ""} ${job.description || ""} ${job.about || ""}`;
                     req.atsResult = atsEngine.calculateScore(resumeText, fullJd);
                 } catch (e) {
                     console.warn("ATS analysis skipped:", e.message);
                 }
             }
-
-            // Determine correct model for refPath
-            const isMainJob = !!(await Job.findById(jobId));
-            const isExternal = !!(await ExternalJob.findById(jobId));
-
-            const application = new JobApplication({
-                jobId,
-                jobModel: isMainJob ? 'Job' : (isExternal ? 'ExternalJob' : 'JobPosting'),
-                userId: userId || null, // Allow guest applications if needed
-                candidateName,
-                candidateEmail,
-                candidatePhone,
-                resumeUrl,
-                coverLetter,
-                atsResult: req.atsResult || null,
-                status: 'pending'
-            });
-
-            await application.save();
-            res.status(201).json({ 
-                message: "Application submitted successfully",
-                application 
-            });
-        } catch (error) {
-            console.error("Apply Error:", error);
-            res.status(500).json({ message: error.message });
         }
-    },
+
+        // ✅ Avoid 2 extra DB round-trips — reuse job already fetched above
+        const jobModel = job instanceof Job
+            ? 'Job'
+            : job instanceof ExternalJob
+                ? 'ExternalJob'
+                : 'JobPosting';
+
+        const application = new JobApplication({
+            jobId,
+            jobModel,
+            userId: userId || null,
+            candidateName,
+            candidateEmail,
+            candidatePhone,
+            resumeUrl,
+            coverLetter,
+            atsResult: req.atsResult || null,
+            status: 'pending'
+        });
+
+        await application.save();
+        res.status(201).json({
+            message: "Application submitted successfully",
+            application
+        });
+
+    } catch (error) {
+        console.error("Apply Error:", error); // ✅ Will now show the real error
+        res.status(500).json({ message: error.message });
+    }
+},
 
     // GET ALL APPLICATIONS (FOR ADMIN)
     getAllApplications: async (req, res) => {

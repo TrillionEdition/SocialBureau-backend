@@ -1,6 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const rateLimit = require('express-rate-limit');
+const cfUpload = require('../middlewares/cloudflare');
+const ResumeDraft = require('../models/resumeModel');
 const resumeController = require('../controllers/resumeController');
 
 const resumeRoutes = express.Router();
@@ -70,6 +72,7 @@ resumeRoutes.post(
 resumeRoutes.post(
     '/save-draft',
     generateLimiter,
+    cfUpload.single('file', 'resumes'),
     resumeController.saveDraft
 );
 
@@ -83,6 +86,17 @@ resumeRoutes.get(
 resumeRoutes.delete(
     '/draft/:draftId',
     resumeController.deleteDraft
+);
+
+const userAuthentication = require('../middlewares/userAuthentication');
+const adminAuthentication = require('../middlewares/adminAuthentication');
+
+// Admin: Get all resumes
+resumeRoutes.get(
+    '/admin/resumes',
+    userAuthentication,
+    adminAuthentication,
+    resumeController.getAdminResumes
 );
 
 // Analyze resume against job description

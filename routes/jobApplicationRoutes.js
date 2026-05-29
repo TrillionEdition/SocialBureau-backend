@@ -1,40 +1,10 @@
 const express = require('express');
 const jobApplicationRoutes = express.Router();
 const jobApplicationController = require('../controllers/jobApplicationController');
-const multer = require('multer');
-
-// Multer Setup - Local Storage as requested
-const fs = require('fs');
-const path = require('path');
-
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const dir = 'assets/job';
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        cb(null, dir);
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        cb(null, uniqueSuffix + '-' + file.originalname);
-    }
-});
-
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype === 'application/pdf' || file.mimetype.includes('pdf')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only PDF files are allowed'), false);
-        }
-    }
-});
+const cfUpload = require('../middlewares/cloudflare');
 
 // USER ACTIONS
-jobApplicationRoutes.post('/apply', upload.single('resume'), jobApplicationController.applyToJob);
+jobApplicationRoutes.post('/apply', cfUpload.single('resume', 'job-applications'), jobApplicationController.applyToJob);
 jobApplicationRoutes.post('/save', jobApplicationController.saveJob);
 jobApplicationRoutes.post('/unsave', jobApplicationController.unsaveJob);
 jobApplicationRoutes.get('/user-applications/:userId', jobApplicationController.getUserApplications);
