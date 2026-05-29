@@ -26,6 +26,7 @@ const mediaWaitlistRoutes = require("./mediaWaitlistRoutes");
 const ajnoraRouters = require("./ajnoraRoutes");
 const lotteryRoutes = require("./lotteryRoutes");
 const posterRoutes = require("./posterRoutes");
+const reelRoutes = require("./reelRoutes");
 
 const router = express.Router();
 
@@ -60,5 +61,6 @@ router.use("/media-waitlist", mediaWaitlistRoutes);
 router.use("/ajnora", ajnoraRouters);
 router.use("/lottery", lotteryRoutes);
 router.use("/posters", posterRoutes);
+router.use("/reels", reelRoutes);
 
 module.exports = router;

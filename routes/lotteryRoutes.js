@@ -29,4 +29,18 @@ lotteryRoutes.patch(
   lotteryController.updateClaimStatus
 );
 
+// Public: Get lottery settings
+lotteryRoutes.get(
+  "/settings",
+  lotteryController.getSettings
+);
+
+// Admin: Update lottery settings
+lotteryRoutes.post(
+  "/settings",
+  userAuthentication,
+  isAdmin,
+  lotteryController.updateSettings
+);
+
 module.exports = lotteryRoutes;

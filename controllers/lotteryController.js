@@ -1,4 +1,5 @@
 const LotteryClaim = require("../models/LotteryClaim");
+const LotterySettings = require("../models/LotterySettings");
 
 // Claim a lottery prize
 exports.createClaim = async (req, res) => {
@@ -74,3 +75,50 @@ exports.updateClaimStatus = async (req, res) => {
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
+
+// Get lottery settings (Publicly accessible)
+exports.getSettings = async (req, res) => {
+  try {
+    let settings = await LotterySettings.findOne();
+    if (!settings) {
+      // Create default settings doc if none exists
+      settings = new LotterySettings({
+        showLotteryOnHomeStart: null,
+        showLotteryOnHomeEnd: null,
+        isActive: false,
+      });
+      await settings.save();
+    }
+    res.status(200).json(settings);
+  } catch (error) {
+    console.error("Error fetching lottery settings:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+// Update lottery settings (Admin only)
+exports.updateSettings = async (req, res) => {
+  try {
+    const { showLotteryOnHomeStart, showLotteryOnHomeEnd, isActive } = req.body;
+
+    let settings = await LotterySettings.findOne();
+    if (!settings) {
+      settings = new LotterySettings();
+    }
+
+    settings.showLotteryOnHomeStart = showLotteryOnHomeStart ? new Date(showLotteryOnHomeStart) : null;
+    settings.showLotteryOnHomeEnd = showLotteryOnHomeEnd ? new Date(showLotteryOnHomeEnd) : null;
+    settings.isActive = isActive !== undefined ? isActive : false;
+
+    await settings.save();
+
+    res.status(200).json({
+      message: "Lottery settings updated successfully!",
+      settings,
+    });
+  } catch (error) {
+    console.error("Error updating lottery settings:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
