@@ -10,5 +10,11 @@ router.post("/api/submit-intake", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// GET all submissions
+router.get("/api/intakes", async (req, res) => {
+  const docs = await intake.find().sort({ createdAt: -1 }).limit(500);
+  res.json(docs);
+});
+
 
 module.exports = router;
