@@ -80,7 +80,6 @@ const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
   try {
-    // Wait for database connection before starting server
     await connectDB();
     
     // Start cron jobs after DB is connected
