@@ -23,6 +23,7 @@ const teamRoutes = require("./teamRoutes");
 const ClientRouters = require("./clientRoutes");
 const apiLeadRoutes = require("./apiLeadRoutes");
 const mediaWaitlistRoutes = require("./mediaWaitlistRoutes");
+const formsRoutes = require("./formsRoutes");
 const ajnoraRouters = require("./ajnoraRoutes");
 const lotteryRoutes = require("./lotteryRoutes");
 const posterRoutes = require("./posterRoutes");
@@ -63,6 +64,7 @@ router.use("/ajnora", ajnoraRouters);
 router.use("/lottery", lotteryRoutes);
 router.use("/posters", posterRoutes);
 router.use("/reels", reelRoutes);
+router.use("/api/forms", formsRoutes);
 router.use("/", intakeRoutes);
 
 module.exports = router;
