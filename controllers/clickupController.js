@@ -1101,8 +1101,9 @@ const clickupController = {
 
       const clickupId = member.user?.clickupId || null;
       let clickupPayload = null;
+      const isAlenOrSham = ['alen-jacob', 'alen', 'shamsk', 'sham-sk'].includes(String(slug).toLowerCase());
 
-      if (clickupId) {
+      if (clickupId && !isAlenOrSham) {
         const now = Date.now();
         const hundredEightyDaysAgo = now - 180 * 24 * 60 * 60 * 1000;
 
@@ -1616,8 +1617,9 @@ const clickupController = {
 
       const clickupId = member.user?.clickupId || null;
       let clickupPayload = null;
+      const isAlenOrSham = ['alen-jacob', 'alen', 'shamsk', 'sham-sk'].includes(String(slug).toLowerCase());
 
-      if (clickupId) {
+      if (clickupId && !isAlenOrSham) {
         const now = Date.now();
         const hundredEightyDaysAgo = now - 180 * 24 * 60 * 60 * 1000;
 
