@@ -18,8 +18,14 @@ mongoose.connect(mongoUri)
     require('../models/achievementModel');
     const TeamMember = require('../models/teamMemberModel');
     
-    const sham = await TeamMember.findOne({ slug: 'shamsk' }).populate('user');
-    const alen = await TeamMember.findOne({ slug: 'alen-jacob' }).populate('user');
+    const sham = await TeamMember.findOne({ slug: 'shamsk' }).populate({
+      path: 'user',
+      populate: { path: 'achievements' }
+    });
+    const alen = await TeamMember.findOne({ slug: 'alen-jacob' }).populate({
+      path: 'user',
+      populate: { path: 'achievements' }
+    });
     
     console.log("=== SHAM SK ===");
     if (sham) {
