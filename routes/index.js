@@ -29,6 +29,7 @@ const lotteryRoutes = require("./lotteryRoutes");
 const posterRoutes = require("./posterRoutes");
 const reelRoutes = require("./reelRoutes");
 const intakeRoutes = require("./intakeRoutes");
+const workflowRoutes = require("./workflowRoutes");
 
 const router = express.Router();
 
@@ -64,6 +65,7 @@ router.use("/ajnora", ajnoraRouters);
 router.use("/lottery", lotteryRoutes);
 router.use("/posters", posterRoutes);
 router.use("/reels", reelRoutes);
+router.use("/workflow", workflowRoutes);
 router.use("/api/forms", formsRoutes);
 router.use("/", intakeRoutes);
 
