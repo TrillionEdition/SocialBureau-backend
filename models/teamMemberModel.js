@@ -46,6 +46,10 @@ const teamMemberSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+    isInternship: {
+      type: Boolean,
+      default: false
+    },
     // When true, the public team roster will NOT link through to the individual profile page
     hideProfileLink: {
       type: Boolean,

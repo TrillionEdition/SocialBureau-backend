@@ -1110,8 +1110,8 @@ const clickupController = {
         const selectedMonth = month !== undefined ? parseInt(month) : new Date().getMonth();
         const selectedYear = year !== undefined ? parseInt(year) : new Date().getFullYear();
 
-        const selectedDateStart = new Date(selectedYear, selectedMonth, 1).getTime();
-        const selectedDateEnd = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999).getTime();
+        const selectedDateStart = new Date(Date.UTC(selectedYear, selectedMonth, 1, 0, 0, 0, 0)).getTime() - 5.5 * 60 * 60 * 1000;
+        const selectedDateEnd = new Date(Date.UTC(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999)).getTime() - 5.5 * 60 * 60 * 1000;
 
         const queryStartDate = Math.min(hundredEightyDaysAgo, selectedDateStart);
         const queryEndDate = Math.max(now, selectedDateEnd);
@@ -1404,10 +1404,16 @@ const clickupController = {
 
             let dailyHours = 0;
             allTimeEntries.forEach(entry => {
-              const entryDate = new Date(parseInt(entry.start));
-              entryDate.setHours(0, 0, 0, 0);
-              if (entryDate.getTime() === targetDate.getTime()) {
-                dailyHours += (Number(entry.duration) || 0) / 3600000;
+              // Convert to IST (UTC + 5.5 hours)
+              const entryDate = new Date(parseInt(entry.start) + 5.5 * 60 * 60 * 1000);
+              const entryYear = entryDate.getUTCFullYear();
+              const entryMonth = entryDate.getUTCMonth();
+              const entryDay = entryDate.getUTCDate();
+
+              if (entryYear === selectedYear && entryMonth === selectedMonth && entryDay === d) {
+                const hrs = (Number(entry.duration) || 0) / 3600000;
+                dailyHours += hrs;
+                console.log(`[Attendance Debug Auth] Match found for ${slug} on Day ${d}: entry.start=${entry.start} (${entryDate.toUTCString()}), duration=${hrs}h`);
               }
             });
 
@@ -1434,7 +1440,8 @@ const clickupController = {
               status,
               date: formattedDate,
               day: dayName,
-              holidayName: holidayName || undefined
+              holidayName: holidayName || undefined,
+              dailyHours: parseFloat(dailyHours.toFixed(2))
             });
           }
 
@@ -1626,8 +1633,8 @@ const clickupController = {
         const selectedMonth = month !== undefined ? parseInt(month) : new Date().getMonth();
         const selectedYear = year !== undefined ? parseInt(year) : new Date().getFullYear();
 
-        const selectedDateStart = new Date(selectedYear, selectedMonth, 1).getTime();
-        const selectedDateEnd = new Date(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999).getTime();
+        const selectedDateStart = new Date(Date.UTC(selectedYear, selectedMonth, 1, 0, 0, 0, 0)).getTime() - 5.5 * 60 * 60 * 1000;
+        const selectedDateEnd = new Date(Date.UTC(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999)).getTime() - 5.5 * 60 * 60 * 1000;
 
         const queryStartDate = Math.min(hundredEightyDaysAgo, selectedDateStart);
         const queryEndDate = Math.max(now, selectedDateEnd);
@@ -1906,10 +1913,16 @@ const clickupController = {
 
             let dailyHours = 0;
             allTimeEntries.forEach(entry => {
-              const entryDate = new Date(parseInt(entry.start));
-              entryDate.setHours(0, 0, 0, 0);
-              if (entryDate.getTime() === targetDate.getTime()) {
-                dailyHours += (Number(entry.duration) || 0) / 3600000;
+              // Convert to IST (UTC + 5.5 hours)
+              const entryDate = new Date(parseInt(entry.start) + 5.5 * 60 * 60 * 1000);
+              const entryYear = entryDate.getUTCFullYear();
+              const entryMonth = entryDate.getUTCMonth();
+              const entryDay = entryDate.getUTCDate();
+
+              if (entryYear === selectedYear && entryMonth === selectedMonth && entryDay === d) {
+                const hrs = (Number(entry.duration) || 0) / 3600000;
+                dailyHours += hrs;
+                console.log(`[Attendance Debug Public] Match found for ${slug} on Day ${d}: entry.start=${entry.start} (${entryDate.toUTCString()}), duration=${hrs}h`);
               }
             });
 
@@ -1936,7 +1949,8 @@ const clickupController = {
               status,
               date: formattedDate,
               day: dayName,
-              holidayName: holidayName || undefined
+              holidayName: holidayName || undefined,
+              dailyHours: parseFloat(dailyHours.toFixed(2))
             });
           }
 

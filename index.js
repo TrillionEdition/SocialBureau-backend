@@ -82,6 +82,21 @@ const startServer = async () => {
   try {
     await connectDB();
     
+    // Auto-verify ClickUp Power User badge for Sham SK, Elizebath, and Hajira on startup
+    const User = require("./models/userModel");
+    try {
+      // Reset first
+      await User.updateMany({}, { $set: { isClickUpVerified: false } });
+      // Set for target users
+      const result = await User.updateMany(
+        { email: { $in: ["ceo@socialbureau.in", "web@socialbureau.in", "admin@socialbureau.in", "webjr.socialbureau@gmail.com", "pmo.socialbureau@gmail.com"] } },
+        { $set: { isClickUpVerified: true } }
+      );
+      console.log(`✅ Auto-verified ClickUp badge for ${result.modifiedCount} users`);
+    } catch (dbErr) {
+      console.error("⚠️ Failed to auto-verify ClickUp badge users on startup:", dbErr.message);
+    }
+    
     // Start cron jobs after DB is connected
     require("./cron/newsletterCron");
     require("./cron/meetingCron");

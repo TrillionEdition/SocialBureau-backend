@@ -497,15 +497,20 @@ const partnershipController = {
 
   // Check meeting status for an email
   checkMeeting: asyncHandler(async (req, res) => {
-    const { email } = req.query;
+    const { email, partnerEmail } = req.query;
 
     if (!email) {
       res.status(400);
       throw new Error("Email is required");
     }
 
+    const query = { userEmail: email };
+    if (partnerEmail) {
+      query.partnerEmail = partnerEmail;
+    }
+
     // Find the most recent meeting for this email
-    const meeting = await Meeting.findOne({ userEmail: email })
+    const meeting = await Meeting.findOne(query)
       .sort("-userDate");
 
     if (!meeting) {

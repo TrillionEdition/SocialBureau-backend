@@ -23,16 +23,21 @@ router.get("/admin/members", userAuthentication, require("../middlewares/isAdmin
   try {
     const members = await TeamMember.find().populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications",
+      select: "email name role isEmployee isInternship emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications blogs",
       populate: [
         { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },
         { path: 'achievements', select: 'title description image date' }
       ]
     });
+    const normalized = members.map(m => {
+      const obj = (m && typeof m.toObject === 'function') ? m.toObject() : m;
+      obj.isInternship = (typeof obj.isInternship !== 'undefined') ? obj.isInternship : (obj.user && obj.user.isInternship) || false;
+      return obj;
+    });
     res.status(200).json({
       success: true,
-      data: members
+      data: normalized
     });
   } catch (error) {
     res.status(500).json({
@@ -50,6 +55,7 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
   try {
     const { id } = req.params;
     const updateData = req.body;
+    console.log('[PUT /admin/member/:id] received updateData keys:', Object.keys(updateData), 'isInternship:', updateData.isInternship);
 
     const TeamMember = require("../models/teamMemberModel");
     const User = require("../models/userModel");
@@ -63,8 +69,8 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
     }
 
     const {
-      email, password, emp_id, phone, doj, rate, clickupId, isEmployee, tools, clients, achievements, coverImage, idCard,
-      hobbies, podcasts, events, innovations, workShowcase, education, certifications,
+      email, password, emp_id, phone, doj, rate, clickupId, isEmployee, isInternship, tools, clients, achievements, coverImage, idCard,
+      hobbies, podcasts, events, innovations, workShowcase, education, certifications, blogs,
       slug,
       ...teamMemberData
     } = updateData;
@@ -101,6 +107,7 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
       if (rate !== undefined) userUpdate.rate = rate;
       if (clickupId !== undefined) userUpdate.clickupId = clickupId;
       if (isEmployee !== undefined) userUpdate.isEmployee = isEmployee;
+      if (isInternship !== undefined) userUpdate.isInternship = isInternship;
       if (coverImage !== undefined) userUpdate.coverImage = coverImage;
       if (idCard !== undefined) userUpdate.idCard = idCard;
       if (hobbies !== undefined) userUpdate.hobbies = hobbies;
@@ -134,6 +141,13 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
           try { parsedWorkShowcase = JSON.parse(workShowcase); } catch (e) { parsedWorkShowcase = []; }
         }
         userUpdate.workShowcase = Array.isArray(parsedWorkShowcase) ? parsedWorkShowcase : [];
+      }
+      if (blogs !== undefined) {
+        let parsedBlogs = blogs;
+        if (typeof blogs === 'string') {
+          try { parsedBlogs = JSON.parse(blogs); } catch (e) { parsedBlogs = []; }
+        }
+        userUpdate.blogs = Array.isArray(parsedBlogs) ? parsedBlogs : [];
       }
 
       if (tools !== undefined) {
@@ -214,13 +228,18 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
       console.log('[PUT /admin/member/:id] Saved user.innovations:', JSON.stringify(savedUser?.innovations));
     }
 
+    // Persist isInternship on the TeamMember document as well (if provided)
+    if (typeof isInternship !== 'undefined') {
+      teamMemberData.isInternship = isInternship;
+    }
+
     const updatedProfile = await TeamMember.findByIdAndUpdate(
       id,
       teamMemberData,
       { new: true, runValidators: true }
     ).populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications",
+      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications blogs",
       populate: [
         { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },
@@ -228,9 +247,12 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
       ]
     });
 
+    const updatedObj = (updatedProfile && typeof updatedProfile.toObject === 'function') ? updatedProfile.toObject() : updatedProfile;
+    updatedObj.isInternship = (typeof updatedObj.isInternship !== 'undefined') ? updatedObj.isInternship : (updatedObj.user && updatedObj.user.isInternship) || false;
+    console.log('[PUT /admin/member/:id] updatedProfile.isInternship:', updatedObj.isInternship, 'user.isInternship:', updatedObj.user?.isInternship);
     res.status(200).json({
       success: true,
-      data: updatedProfile
+      data: updatedObj
     });
   } catch (error) {
     res.status(500).json({
@@ -301,6 +323,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       socials,
       consultations,
       isPublic,
+      isInternship,
       // NEW FIELDS
       clickupId,
       rate,
@@ -315,6 +338,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       events,
       innovations,
       workShowcase,
+      blogs,
       slug
     } = req.body;
 
@@ -433,6 +457,12 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
     }
     const cleanAchievementIds = achievementIds.filter(Boolean);
 
+    // 3.6 Parse Blogs
+    let parsedBlogs = blogs;
+    if (typeof blogs === 'string') {
+      try { parsedBlogs = JSON.parse(blogs); } catch (e) { parsedBlogs = []; }
+    }
+
     // 4. Create User record
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = await User.create({
@@ -444,6 +474,7 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       doj: doj ? new Date(doj) : undefined,
       role,
       isEmployee: isEmployee !== undefined ? isEmployee : true,
+      isInternship: isInternship !== undefined ? isInternship : false,
       clickupId: clickupId ? String(clickupId).trim() : undefined,
       rate: rate ? Number(rate) : undefined,
       coverImage: coverImage || undefined,
@@ -455,7 +486,8 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       podcasts: podcasts || [],
       events: events || [],
       innovations: innovations || [],
-      workShowcase: workShowcase || []
+      workShowcase: workShowcase || [],
+      blogs: parsedBlogs || []
     });
 
     // Update user reference in achievements
@@ -492,18 +524,21 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
       category: category || [],
       bgColor: bgColor || "#ff3358",
       hasBakedText: hasBakedText !== undefined ? hasBakedText : true,
+      isInternship: isInternship !== undefined ? isInternship : false,
       socials: socials || { linkedin: "", instagram: "", twitter: "" },
       consultations: consultations || { price30Min: "", price60Min: "", priceFullDay: "" },
       isPublic: isPublic !== undefined ? isPublic : false,
       slug: finalSlug
     });
 
+    const teamMemberObj = (newTeamMember && typeof newTeamMember.toObject === 'function') ? newTeamMember.toObject() : newTeamMember;
+    teamMemberObj.isInternship = (typeof teamMemberObj.isInternship !== 'undefined') ? teamMemberObj.isInternship : (newUser && newUser.isInternship) || false;
     res.status(201).json({
       success: true,
       message: "Employee and TeamMember profile created successfully.",
       data: {
         user: newUser,
-        teamMember: newTeamMember
+        teamMember: teamMemberObj
       }
     });
 
@@ -523,10 +558,20 @@ router.post("/admin/member", userAuthentication, require("../middlewares/isAdmin
  */
 router.get("/", async (req, res) => {
   try {
-    const members = await TeamMember.find({ isPublic: true }).sort({ createdAt: 1 });
+    const members = await TeamMember.find({ isPublic: true })
+      .sort({ createdAt: 1 })
+      .populate({
+        path: "user",
+        select: "email name role isEmployee isInternship emp_id clickupId coverImage isClickUpVerified"
+      });
+    const normalized = members.map(m => {
+      const obj = (m && typeof m.toObject === 'function') ? m.toObject() : m;
+      obj.isInternship = (typeof obj.isInternship !== 'undefined') ? obj.isInternship : (obj.user && obj.user.isInternship) || false;
+      return obj;
+    });
     res.status(200).json({
       success: true,
-      data: members
+      data: normalized
     });
   } catch (error) {
     res.status(500).json({
@@ -546,7 +591,7 @@ router.get("/me", userAuthentication, async (req, res) => {
   try {
     const profile = await TeamMember.findOne({ user: req.user.id }).populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications",
+      select: "email name role isEmployee isInternship emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications blogs",
       populate: [
         { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },
@@ -556,7 +601,7 @@ router.get("/me", userAuthentication, async (req, res) => {
     
     if (!profile) {
       const populatedUser = await User.findById(req.user.id)
-        .select("email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications")
+        .select("email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications blogs")
         .populate([
           { path: 'tools', select: 'toolName icon url description level' },
           { path: 'clients', select: 'name companyName email website logo status notes' },
@@ -626,7 +671,8 @@ router.put("/me", userAuthentication, async (req, res) => {
       innovations,
       workShowcase,
       education,
-      certifications
+      certifications,
+      blogs
     } = req.body;
 
     let profile = await TeamMember.findOne({ user: req.user.id });
@@ -708,6 +754,13 @@ router.put("/me", userAuthentication, async (req, res) => {
         try { parsedWorkShowcase = JSON.parse(workShowcase); } catch (e) { parsedWorkShowcase = []; }
       }
       userUpdate.workShowcase = Array.isArray(parsedWorkShowcase) ? parsedWorkShowcase : [];
+    }
+    if (blogs !== undefined) {
+      let parsedBlogs = blogs;
+      if (typeof blogs === 'string') {
+        try { parsedBlogs = JSON.parse(blogs); } catch (e) { parsedBlogs = []; }
+      }
+      userUpdate.blogs = Array.isArray(parsedBlogs) ? parsedBlogs : [];
     }
 
     // Relational: Tools
@@ -808,7 +861,7 @@ router.put("/me", userAuthentication, async (req, res) => {
     // Re-populate everything before returning
     const updatedProfile = await TeamMember.findById(profile._id).populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications",
+      select: "email name role isEmployee isInternship emp_id clickupId phone doj rate tools clients achievements coverImage idCard location rating ratingCount exp hobbies podcasts events innovations workShowcase education certifications blogs",
       populate: [
         { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },
@@ -858,7 +911,7 @@ router.get("/member/slug/:slug", async (req, res) => {
     const { slug } = req.params;
     const member = await TeamMember.findOne({ slug }).populate({
       path: "user",
-      select: "email name role isEmployee emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications",
+      select: "email name role isEmployee isInternship emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications blogs",
       populate: [
         { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },

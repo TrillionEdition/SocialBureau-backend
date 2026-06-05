@@ -32,40 +32,54 @@ const reviewController = {
         return sendError(res, 400, 'rating must be an integer between 1 and 5');
       }
 
-      // Duplicate prevention
+      // Duplicate prevention / Auto-update existing
       const dupFilter = {};
       dupFilter.email = email.toLowerCase();
       dupFilter.employee = employeeId;
 
-      if (Object.keys(dupFilter).length > 0) {
-        const existing = await Review.findOne(dupFilter).lean();
+      let saved;
+      let isNew = true;
+      if (employeeId) {
+        const existing = await Review.findOne(dupFilter);
         if (existing) {
-          return sendError(res, 409, 'A review from this author for this employee already exists');
+          existing.name = name;
+          existing.company = req.body.company || existing.company;
+          existing.review = review;
+          existing.rating = ratingInt;
+          existing.approved = true;
+          existing.createdAt = new Date(); // Update date so it comes to the top
+          saved = await existing.save();
+          isNew = false;
         }
       }
 
-      const newReview = new Review({
-        name,
-        email,
-        review,
-        rating: ratingInt,
-        employee: employeeId,
-        approved: false, // default; moderation flow
-      });
-      const saved = await newReview.save();
+      if (isNew) {
+        const newReview = new Review({
+          name,
+          email,
+          company: req.body.company,
+          review,
+          rating: ratingInt,
+          employee: employeeId,
+          approved: true, // auto-approved for instant visibility in testing
+        });
+        saved = await newReview.save();
+      }
 
       const user = await User.findById(employeeId);
       if (!user) {
-        // handle missing user appropriately (example: return or throw)
+        // handle missing user appropriately
         return sendError(res, 404, 'Employee not found');
       }
 
-      // ensure reviews array exists, then push the review id
+      // ensure reviews array exists, then push the review id if not already present
       user.reviews = user.reviews || [];
-      user.reviews.push(newReview._id);
-
-      // persist the change
-      await user.save();
+      const reviewIdStr = saved._id.toString();
+      const hasReview = user.reviews.some(id => id && id.toString() === reviewIdStr);
+      if (!hasReview) {
+        user.reviews.push(saved._id);
+        await user.save();
+      }
 
 
       // Optionally populate user/employee
