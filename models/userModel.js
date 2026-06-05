@@ -45,6 +45,10 @@ const userSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isInternship: {
+      type: Boolean,
+      default: false,
+    },
 
     clients: [
       {
@@ -97,6 +101,10 @@ const userSchema = new mongoose.Schema(
     },
     rating: {
       type: Number
+    },
+    isClickUpVerified: {
+      type: Boolean,
+      default: false
     },
     rate: {
       type: Number
@@ -207,6 +215,13 @@ const userSchema = new mongoose.Schema(
         description: String,
         images: [String],
         link: String
+      }
+    ],
+    blogs: [
+      {
+        heading: String,
+        link: String,
+        image: String
       }
     ],
   },
