@@ -2,37 +2,39 @@ const LotteryClaim = require("../models/LotteryClaim");
 const LotterySettings = require("../models/LotterySettings");
 
 // Claim a lottery prize
-exports.createClaim = async (req, res) => {
-  try {
-    const { name, amount, gpayNumber } = req.body;
+exports.createClaim = async (req, res) => {res.status(410).json({ 
+    message: "Campaign has ended. Please refresh the page." 
+  });
+  // try {
+  //   const { name, amount, gpayNumber } = req.body;
     
-    if (!name || !amount) {
-      return res.status(400).json({ message: "Name and Amount are required" });
-    }
+  //   if (!name || !amount) {
+  //     return res.status(400).json({ message: "Name and Amount are required" });
+  //   }
 
-    let qrCodeUrl = "";
-    if (req.file && req.file.location) {
-      qrCodeUrl = req.file.location; // Cloudflare R2 uploaded image URL
-    }
+  //   let qrCodeUrl = "";
+  //   if (req.file && req.file.location) {
+  //     qrCodeUrl = req.file.location; // Cloudflare R2 uploaded image URL
+  //   }
 
-    const newClaim = new LotteryClaim({
-      name,
-      amount,
-      gpayNumber,
-      qrCode: qrCodeUrl,
-      status: "Pending",
-    });
+  //   const newClaim = new LotteryClaim({
+  //     name,
+  //     amount,
+  //     gpayNumber,
+  //     qrCode: qrCodeUrl,
+  //     status: "Pending",
+  //   });
 
-    await newClaim.save();
+  //   await newClaim.save();
     
-    res.status(201).json({
-      message: "Lottery claim submitted successfully!",
-      claim: newClaim,
-    });
-  } catch (error) {
-    console.error("Error creating lottery claim:", error);
-    res.status(500).json({ message: "Internal Server Error", error: error.message });
-  }
+  //   res.status(201).json({
+  //     message: "Lottery claim submitted successfully!",
+  //     claim: newClaim,
+  //   });
+  // } catch (error) {
+  //   console.error("Error creating lottery claim:", error);
+  //   res.status(500).json({ message: "Internal Server Error", error: error.message });
+  // }
 };
 
 // Get all claims (Admin only)
