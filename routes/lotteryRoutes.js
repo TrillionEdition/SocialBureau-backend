@@ -14,12 +14,12 @@ lotteryRoutes.post(
 );
 
 // Admin: Get all claims
-// lotteryRoutes.get(
-//   "/claims",
-//   userAuthentication,
-//   isAdmin,
-//   lotteryController.getClaims
-// );
+lotteryRoutes.get(
+  "/claims",
+  userAuthentication,
+  isAdmin,
+  lotteryController.getClaims
+);
 
 // Admin: Update claim status (Mark as Paid/Pending)
 lotteryRoutes.patch(
