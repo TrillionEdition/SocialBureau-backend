@@ -48,7 +48,7 @@ async function generateSitemaps(options = {}) {
     { loc: 'https://www.socialbureau.in/privacy-policy', changefreq: 'yearly', priority: '0.6' },
     { loc: 'https://www.socialbureau.in/cookie-policy', changefreq: 'yearly', priority: '0.5' },
     { loc: 'https://www.socialbureau.in/disclaimer', changefreq: 'yearly', priority: '0.5' },
-    { loc: 'https://www.socialbureau.in/our-team', changefreq: 'monthly', priority: '0.6' },
+    { loc: 'https://www.socialbureau.in/team', changefreq: 'monthly', priority: '0.6' },
     { loc: 'https://www.socialbureau.in/partners', changefreq: 'monthly', priority: '0.5' },
     { loc: 'https://www.socialbureau.in/leaderboard', changefreq: 'monthly', priority: '0.4' }
   ];
