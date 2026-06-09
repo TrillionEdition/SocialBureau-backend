@@ -224,6 +224,10 @@ const userSchema = new mongoose.Schema(
         image: String
       }
     ],
+    googleId: {
+      type: String,
+      index: true,
+    },
   },
   {
     timestamps: true,

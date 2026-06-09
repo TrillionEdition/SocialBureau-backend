@@ -11,6 +11,7 @@ userRouter.post('/register', upload.fields([
     { name: 'toolIcons', maxCount: 20 }
 ], 'socialbureau-media/images/users'), userController.register)
 userRouter.post("/login", userController.login)
+userRouter.post("/google-login", userController.googleLogin)
 userRouter.get('/logout', userController.logout)
 userRouter.get('/team', userController.getUsers)
 userRouter.put('/tools', userController.updateTool)
@@ -27,6 +28,8 @@ userRouter.get('/health-check', (req, res) => {
 userRouter.post("/forgot-password", userController.forgotPassword);
 userRouter.post("/verify-otp", userController.verifyResetOTP);
 userRouter.post("/reset-password", userController.resetPassword);
+userRouter.post("/send-signup-email-otp", userController.sendSignupEmailOTP);
+userRouter.post("/verify-signup-email-otp", userController.verifySignupEmailOTP);
 userRouter.post("/logout", userAuthentication, userController.logout)
 
 // Specific user routes (must come after static routes like /team, /leaderboard to avoid conflicts if IDs are not validated)

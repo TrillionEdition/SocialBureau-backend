@@ -65,6 +65,10 @@ const partnershipSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    isVisible: {
+      type: Boolean,
+      default: false,
+    },
     updatedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

@@ -14,6 +14,8 @@ const { getLatestPublishedBlog, getLatestActiveJob } = require("../services/blog
 const crypto = require("crypto");
 const { storeVerificationCode, getVerificationCode, removeVerificationCode } = require("../utils/redis/Advancedcaching");
 const { default: axios } = require("axios");
+const { OAuth2Client } = require("google-auth-library");
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // helper to get upload URL from multer/cloudinary file object
 function getUrlFromFile(f) {
@@ -77,15 +79,56 @@ const syncClickupName = async (user) => {
 const userController = {
 
   register: asyncHandler(async (req, res) => {
-    const { clickupId, clickupListId, clickupChatViewId, clickupToken, email, name, password, role, emp_id, doj, rate, phone, isEmployee } = req.body;
+    const { clickupId, clickupListId, clickupChatViewId, clickupToken, email, name, password, role, emp_id, doj, rate, phone, isEmployee, captchaToken } = req.body;
     console.log(" Register attempt with email:", email);
+
+    // Verify Cloudflare Turnstile Captcha
+    if (process.env.CAPTCHA_SECRET_KEY) {
+      if (!captchaToken) {
+        res.status(400);
+        throw new Error("Captcha verification is required");
+      }
+      try {
+        const captchaResponse = await axios.post(
+          "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+          {
+            secret: process.env.CAPTCHA_SECRET_KEY,
+            response: captchaToken,
+          }
+        );
+        if (!captchaResponse.data || !captchaResponse.data.success) {
+          console.error("Captcha verification failed details:", captchaResponse.data);
+          res.status(400);
+          throw new Error("Captcha verification failed. Please try again.");
+        }
+      } catch (err) {
+        console.error("Error verifying captcha:", err.message);
+        res.status(400);
+        throw new Error(err.message || "Captcha verification failed. Please try again.");
+      }
+    }
 
     const sanitizedClickupId = (clickupId && String(clickupId).trim()) ? String(clickupId).trim() : undefined;
     const sanitizedRate = (rate && String(rate).trim()) ? Number(rate) : undefined;
 
     if (email) {
+      const emailNormalized = email.toLowerCase().trim();
+      
+      // Verification Guard for Gmail and Partner signups
+      const isGmail = emailNormalized.includes("gmail.com");
+      const isPartner = role === "partner" || role === "partnership";
+      if (isGmail || isPartner) {
+        const isVerified = await getVerificationCode(`signup_verified:${emailNormalized}`);
+        if (!isVerified || isVerified !== "true") {
+          res.status(400);
+          throw new Error("Email verification is required for registration");
+        }
+        // Remove verification flag
+        await removeVerificationCode(`signup_verified:${emailNormalized}`);
+      }
+
       const emailExists = await User.findOne({
-        email: email.toLowerCase().trim(),
+        email: emailNormalized,
       });
 
       console.log("Email check result:", emailExists);
@@ -387,7 +430,33 @@ const userController = {
   }),
 
   login: asyncHandler(async (req, res) => {
-    const { email, clickupId, password } = req.body;
+    const { email, clickupId, password, captchaToken } = req.body;
+
+    // Verify Cloudflare Turnstile Captcha
+    if (process.env.CAPTCHA_SECRET_KEY) {
+      if (!captchaToken) {
+        res.status(400);
+        throw new Error("Captcha verification is required");
+      }
+      try {
+        const captchaResponse = await axios.post(
+          "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+          {
+            secret: process.env.CAPTCHA_SECRET_KEY,
+            response: captchaToken,
+          }
+        );
+        if (!captchaResponse.data || !captchaResponse.data.success) {
+          console.error("Captcha verification failed details:", captchaResponse.data);
+          res.status(400);
+          throw new Error("Captcha verification failed. Please try again.");
+        }
+      } catch (err) {
+        console.error("Error verifying captcha:", err.message);
+        res.status(400);
+        throw new Error(err.message || "Captcha verification failed. Please try again.");
+      }
+    }
 
     const userExist = await User.findOne({
       $or: [
@@ -468,6 +537,244 @@ const userController = {
         hasPaidInfluencer: userExist.hasPaidInfluencer,
       },
     });
+  }),
+
+  googleLogin: asyncHandler(async (req, res) => {
+    const { idToken, role } = req.body;
+
+    if (!idToken) {
+      res.status(400);
+      throw new Error("Google ID token is required");
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      console.warn("⚠️ GOOGLE_CLIENT_ID is not configured in backend environment variables. Token verification might fail.");
+    }
+
+    let payload;
+    try {
+      const ticket = await googleClient.verifyIdToken({
+        idToken,
+        audience: clientId,
+      });
+      payload = ticket.getPayload();
+    } catch (verifyErr) {
+      console.error("❌ Google ID Token verification failed:", verifyErr.message);
+      res.status(401);
+      throw new Error("Invalid Google token: " + verifyErr.message);
+    }
+
+    const { sub: googleId, email, name, picture } = payload;
+
+    if (!email) {
+      res.status(400);
+      throw new Error("Email not returned from Google");
+    }
+
+    // Try finding the user by googleId, or by email
+    let user = await User.findOne({
+      $or: [
+        { googleId },
+        { email: email.toLowerCase().trim() }
+      ]
+    });
+
+    let isNewUser = false;
+
+    if (!user) {
+      // Register the user
+      isNewUser = true;
+      // Password is required by the schema, so generate a secure random password
+      const randomPassword = crypto.randomBytes(32).toString("hex");
+      const hashed_password = await bcrypt.hash(randomPassword, 10);
+
+      user = await User.create({
+        googleId,
+        email: email.toLowerCase().trim(),
+        name: name || email.split("@")[0],
+        password: hashed_password,
+        avatar: picture,
+        role: role || "user", // Default role
+        verification: true, // Google accounts are verified
+      });
+
+      console.log(`✅ New user registered via Google: ${user.email}`);
+
+      // Auto subscribe user to newsletter (non-blocking)
+      try {
+        await Subscriber.findOneAndUpdate(
+          { email: user.email.toLowerCase().trim() },
+          {
+            email: user.email.toLowerCase().trim(),
+            isActive: true,
+          },
+          {
+            upsert: true,
+            new: true,
+            setDefaultsOnInsert: true,
+          }
+        );
+      } catch (err) {
+        console.error("⚠️ Newsletter subscription failed for Google user:", err.message);
+      }
+    } else {
+      // User exists. Ensure googleId is linked if not already set
+      let needsSave = false;
+      if (!user.googleId) {
+        user.googleId = googleId;
+        needsSave = true;
+      }
+      if (picture && !user.avatar) {
+        user.avatar = picture;
+        needsSave = true;
+      }
+      if (needsSave) {
+        await user.save();
+      }
+      console.log(`✅ Existing user logged in via Google: ${user.email}`);
+    }
+
+    // Sync ClickUp Name on login
+    await syncClickupName(user);
+    await user.save();
+
+    const isEmployee = Boolean(user.isEmployee);
+    const isVerified = user.verification === true;
+
+    const jwtPayload = {
+      id: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      verification: !!user.verification,
+    };
+
+    const secret = process.env.JWT_SECRET_KEY || "SocialBureau";
+    const token = jwt.sign(jwtPayload, secret, {
+      expiresIn: "1d",
+    });
+
+    res.cookie("token", token, {
+      maxAge: 2 * 24 * 60 * 60 * 1000,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+    });
+
+    res.json({
+      message: isNewUser ? "Registration via Google successful" : "Login successful",
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        verification: user.verification,
+        clickupId: user.clickupId,
+        clickupListId: user.clickupListId,
+        clickupChatViewId: user.clickupChatViewId,
+        clickupToken: user.clickupToken,
+        isEmployee,
+        isVerified,
+        hasPaidInfluencer: user.hasPaidInfluencer,
+        avatar: user.avatar,
+      },
+    });
+  }),
+
+  sendSignupEmailOTP: asyncHandler(async (req, res) => {
+    const { email } = req.body;
+    if (!email) {
+      res.status(400);
+      throw new Error("Email is required");
+    }
+
+    const emailNormalized = email.toLowerCase().trim();
+    
+    // Check if email already exists
+    const emailExists = await User.findOne({ email: emailNormalized });
+    if (emailExists) {
+      res.status(400);
+      throw new Error("Email already exists");
+    }
+
+    // Generate 6-digit numeric OTP
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // Store OTP in Redis/Memory with 10 minute expiry
+    try {
+      console.log(`[SIGNUP EMAIL OTP] Storing code for ${emailNormalized}: ${otp}`);
+      await storeVerificationCode(`signup_email_otp:${emailNormalized}`, otp, 600);
+    } catch (redisError) {
+      console.warn("OTP Storage warning:", redisError.message);
+    }
+
+    try {
+      await sendMail({
+        to: emailNormalized,
+        subject: "Identity Verification - SocialBureau Registration",
+        html: `
+        <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: auto; padding: 40px; background: #000; color: #fff; border: 1px solid #333; border-radius: 24px;">
+          <div style="text-align: center; margin-bottom: 40px;">
+            <h1 style="color: #E8001A; font-weight: 900; letter-spacing: -2px; margin: 0; font-size: 32px; text-transform: uppercase; font-style: italic;">SocialBureau</h1>
+            <p style="color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 4px; margin-top: 10px;">Registration Verification Protocol</p>
+          </div>
+          
+          <p style="font-size: 16px; color: #ccc; line-height: 1.6;">Thank you for registering. Please use the following verification code to confirm your email address:</p>
+          
+          <div style="text-align: center; margin: 40px 0;">
+            <div style="display: inline-block; background: #111; padding: 30px 50px; border-radius: 16px; border: 1px solid #E8001A; box-shadow: 0 10px 30px rgba(232, 0, 26, 0.1);">
+              <span style="font-size: 42px; font-weight: 900; letter-spacing: 12px; color: #fff; font-family: monospace;">${otp}</span>
+            </div>
+          </div>
+          
+          <p style="font-size: 13px; color: #444; text-align: center;">This code will expire in 10 minutes. If you did not initiate this registration, please ignore this email.</p>
+          
+          <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #222; text-align: center;">
+            <p style="font-size: 9px; color: #333; text-transform: uppercase; letter-spacing: 2px;">© 2026 SocialBureau // Identity Systems</p>
+          </div>
+        </div>
+      `,
+      });
+      console.log(`[SIGNUP EMAIL OTP] Sent to ${emailNormalized}`);
+    } catch (mailError) {
+      console.error(`[SIGNUP EMAIL OTP ERROR] Failed to send to ${emailNormalized}:`, mailError.message);
+      res.status(500);
+      throw new Error(`Email delivery failed: ${mailError.message}`);
+    }
+
+    res.json({ success: true, message: "Verification code sent successfully to email." });
+  }),
+
+  verifySignupEmailOTP: asyncHandler(async (req, res) => {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      res.status(400);
+      throw new Error("Email and OTP are required");
+    }
+
+    const emailNormalized = email.toLowerCase().trim();
+    const storedOtp = await getVerificationCode(`signup_email_otp:${emailNormalized}`);
+
+    console.log(`[SIGNUP EMAIL OTP] Verifying for ${emailNormalized}. Provided: ${otp}, Stored: ${storedOtp}`);
+
+    if (!storedOtp || storedOtp !== otp) {
+      res.status(400);
+      throw new Error("Invalid or expired verification code");
+    }
+
+    // Remove OTP after successful verification
+    await removeVerificationCode(`signup_email_otp:${emailNormalized}`);
+
+    // Set verification flag for registration
+    try {
+      await storeVerificationCode(`signup_verified:${emailNormalized}`, "true", 300);
+    } catch (cacheErr) {
+      console.warn("Verification cache set failed:", cacheErr.message);
+    }
+
+    res.json({ success: true, message: "Email verification successful." });
   }),
 
   logout: asyncHandler(async (req, res) => {

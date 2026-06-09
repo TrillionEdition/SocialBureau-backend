@@ -10,7 +10,7 @@ const User = require("../models/userModel");
 const partnershipController = {
   // Create a new partnership
   createPartner: asyncHandler(async (req, res) => {
-    const { name, param, email, category, status, tags, image, subtitle, role, user } = req.body;
+    const { name, param, email, category, status, tags, image, subtitle, role, user, isVisible } = req.body;
 
     if (!name || !param) {
       res.status(400);
@@ -36,6 +36,7 @@ const partnershipController = {
       subtitle,
       role: role || "partnership",
       user: user || undefined,
+      isVisible: isVisible !== undefined ? isVisible : false,
       updatedBy: req.user?.id,
     });
 
@@ -51,6 +52,11 @@ const partnershipController = {
     const filter = {};
     if (req.query.category) filter.category = req.query.category;
     if (req.query.isFree) filter.isFree = req.query.isFree === 'true';
+
+    // Only show visible ones to public unless requested by adminView
+    if (req.query.adminView !== "true") {
+      filter.isVisible = true;
+    }
 
     const partners = await Partnership.find(filter)
       .populate("updatedBy", "name email")
@@ -76,6 +82,30 @@ const partnershipController = {
       throw new Error("Partner not found");
     }
 
+    // Handle private visibility access check
+    if (partner.isVisible !== true) {
+      let hasAccess = false;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        try {
+          const token = authHeader.split(" ")[1];
+          const jwt = require("jsonwebtoken");
+          const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY || "SocialBureau");
+          const user = await User.findById(decoded.id);
+          if (user && (user.role === "admin" || user._id.toString() === partner.user?.toString())) {
+            hasAccess = true;
+          }
+        } catch (e) {
+          // invalid token
+        }
+      }
+
+      if (!hasAccess) {
+        res.status(403);
+        throw new Error("This portfolio is private.");
+      }
+    }
+
     res.json({
       success: true,
       data: partner,
@@ -91,7 +121,7 @@ const partnershipController = {
       throw new Error("Partner not found");
     }
 
-    const { name, param, email, category, status, tags, image, subtitle, role, user, details, isFree, templateId } = req.body;
+    const { name, param, email, category, status, tags, image, subtitle, role, user, details, isFree, templateId, isVisible } = req.body;
     console.log(`💾 SAVE REQUEST: Image=${image}, Name=${name}, Param=${param}`);
 
     // Check if param is being changed and if it conflicts
@@ -118,6 +148,7 @@ const partnershipController = {
     partner.templateId = templateId || partner.templateId;
     partner.isFree = isFree !== undefined ? isFree : partner.isFree;
     partner.user = user !== undefined ? (user || undefined) : partner.user;
+    partner.isVisible = isVisible !== undefined ? isVisible : partner.isVisible;
     partner.updatedBy = req.user?.id;
 
     if (details) {
@@ -342,7 +373,7 @@ const partnershipController = {
   createOrUpdateMyPartnership: asyncHandler(async (req, res) => {
     try {
       const userId = req.user?._id || req.user?.id;
-      const { name, param, email, category, status, tags, image, subtitle, details, templateId } = req.body;
+      const { name, param, email, category, status, tags, image, subtitle, details, templateId, isVisible } = req.body;
       
       if (!name || !param) {
         res.status(400);
@@ -385,6 +416,9 @@ const partnershipController = {
         templateId: templateId || (partner ? partner.templateId : "template1"),
         isFree: req.body.isFree || false,
         hasPaid: req.body.hasPaid || (partner ? partner.hasPaid : false),
+        isVisible: req.user?.role === "admin" && isVisible !== undefined 
+          ? isVisible 
+          : (partner ? partner.isVisible : false),
         role: "partnership",
         user: userId,
         updatedBy: userId
@@ -426,9 +460,9 @@ const partnershipController = {
   // Get student stats for floating notifications
   getStudentStats: asyncHandler(async (req, res) => {
     try {
-      const totalCount = await Partnership.countDocuments({ isFree: true });
+      const totalCount = await Partnership.countDocuments({ isFree: true, isVisible: true });
       
-      const recentStudents = await Partnership.find({ isFree: true })
+      const recentStudents = await Partnership.find({ isFree: true, isVisible: true })
         .select("name image param user")
         .populate("user", "avatar name")
         .sort("-createdAt")
@@ -523,6 +557,33 @@ const partnershipController = {
       userDate: meeting.userDate,
       partnerName: meeting.partnerName,
       meetingId: meeting._id
+    });
+  }),
+
+  // Toggle partnership visibility
+  toggleVisibility: asyncHandler(async (req, res) => {
+    const partner = await Partnership.findById(req.params.id);
+
+    if (!partner) {
+      res.status(404);
+      throw new Error("Partner not found");
+    }
+
+    // Check permissions: ONLY admins can verify and toggle visibility
+    const isAdmin = req.user?.role === "admin";
+
+    if (!isAdmin) {
+      res.status(403);
+      throw new Error("Only admins can verify and toggle visibility");
+    }
+
+    partner.isVisible = !partner.isVisible;
+    await partner.save();
+
+    res.json({
+      success: true,
+      message: `Partnership visibility updated to ${partner.isVisible ? 'public' : 'private'}`,
+      data: partner,
     });
   }),
 };
