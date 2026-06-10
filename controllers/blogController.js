@@ -25,7 +25,6 @@ const blogController = {
 
       const { title, excerpt, content, category, author, slug, customUrl, keywords, childBlogs, seoTitle, seoDescription } = req.body;
 
-      // Get user ID from authenticated request
       const userId = req.user?._id || req.user?.id;
 
       if (!title) return sendError(res, 400, 'Title is required');
