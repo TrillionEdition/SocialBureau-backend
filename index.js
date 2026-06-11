@@ -81,13 +81,9 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     await connectDB();
-    
-    // Auto-verify ClickUp Power User badge for Sham SK, Elizebath, and Hajira on startup
     const User = require("./models/userModel");
     try {
-      // Reset first
       await User.updateMany({}, { $set: { isClickUpVerified: false } });
-      // Set for target users
       const result = await User.updateMany(
         { email: { $in: ["ceo@socialbureau.in", "web@socialbureau.in", "admin@socialbureau.in", "webjr.socialbureau@gmail.com", "pmo.socialbureau@gmail.com"] } },
         { $set: { isClickUpVerified: true } }
@@ -96,8 +92,6 @@ const startServer = async () => {
     } catch (dbErr) {
       console.error("⚠️ Failed to auto-verify ClickUp badge users on startup:", dbErr.message);
     }
-    
-    // Start cron jobs after DB is connected
     require("./cron/newsletterCron");
     require("./cron/meetingCron");
 
@@ -110,8 +104,6 @@ const startServer = async () => {
   } catch (err) {
     console.error("❌ Critical Failure: Could not start server due to DB connection error.");
     console.error(err);
-    // In production, we might want to keep the process alive for health checks, 
-    // but here we fail fast so it can be restarted.
     process.exit(1);
   }
 };

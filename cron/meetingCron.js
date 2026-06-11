@@ -19,8 +19,6 @@ cron.schedule("* * * * *", async () => {
       status: "scheduled"
     });
 
-    console.log(`🔍 Found ${upcomingMeetings.length} upcoming meetings to send links for.`);
-
     for (const meeting of upcomingMeetings) {
       console.log(`🚀 Generating meeting link for: ${meeting.userName} & ${meeting.partnerName}...`);
       

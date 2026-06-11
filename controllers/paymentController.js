@@ -15,7 +15,11 @@ const razorpay = new Razorpay({
 if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
   console.error("❌ CRITICAL: Razorpay Keys are missing from .env!");
 } else {
-  console.log("✅ Razorpay Keys loaded successfully (ID starts with:", process.env.RAZORPAY_KEY_ID.substring(0, 8), ")");
+  try {
+    console.log("✅ Razorpay Keys loaded successfully (ID starts with:", String(process.env.RAZORPAY_KEY_ID).substring(0, 8), ")");
+  } catch (e) {
+    console.log("✅ Razorpay Keys loaded");
+  }
 }
 
 /**
@@ -25,37 +29,41 @@ if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
  */
 exports.createOrder = async (req, res) => {
   try {
-    const { amount, currency = "INR" } = req.body;
+    const { amount, currency = "INR" } = req.body || {};
 
-    if (!amount) {
-      return res.status(400).json({ success: false, message: "Amount is required" });
+    const amountNum = Number(amount);
+    if (!amount || Number.isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ success: false, message: "Valid amount is required" });
+    }
+
+    if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
+      console.error("Create Order failed: Razorpay keys missing");
+      return res.status(500).json({ success: false, message: "Payment gateway not configured" });
     }
 
     const options = {
-      amount: amount * 100, // Amount in paise
+      amount: Math.round(amountNum * 100), // Amount in paise
       currency,
       receipt: `receipt_${Date.now()}`,
     };
 
     console.log("Attempting to create Razorpay order with options:", options);
     const order = await razorpay.orders.create(options);
-    console.log("Razorpay order created successfully:", order.id);
+    console.log("Razorpay order created successfully:", order && order.id);
 
     if (!order) {
       return res.status(500).json({ success: false, message: "Error creating order" });
     }
 
-    res.status(200).json({
-      success: true,
-      order,
-    });
+    return res.status(200).json({ success: true, order });
   } catch (error) {
-    console.error("Razorpay Order Error:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: error.message || "Razorpay API error",
-      details: error 
-    });
+    console.error("Razorpay Order Error:", error && (error.stack || error));
+    const msg = (error && (error.message || error.error || error.description)) || "Razorpay API error";
+    const payload = { success: false, message: msg };
+    if (process.env.NODE_ENV !== "production") {
+      payload.error = error && (error.stack || error);
+    }
+    res.status(500).json(payload);
   }
 };
 
