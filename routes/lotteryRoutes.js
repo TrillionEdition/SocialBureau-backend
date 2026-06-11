@@ -35,6 +35,12 @@ lotteryRoutes.get(
   lotteryController.getSettings
 );
 
+// Public: Get public treasure hunt leaderboard
+lotteryRoutes.get(
+  "/public-leaderboard",
+  lotteryController.getPublicLeaderboard
+);
+
 // Admin: Update lottery settings
 lotteryRoutes.post(
   "/settings",

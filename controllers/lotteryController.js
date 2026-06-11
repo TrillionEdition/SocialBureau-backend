@@ -1,40 +1,38 @@
 const LotteryClaim = require("../models/LotteryClaim");
 const LotterySettings = require("../models/LotterySettings");
 
-// Claim a lottery prize
-exports.createClaim = async (req, res) => {res.status(410).json({ 
-    message: "Campaign has ended. Please refresh the page." 
-  });
-  // try {
-  //   const { name, amount, gpayNumber } = req.body;
+// Claim a treasure hunt prize
+exports.createClaim = async (req, res) => {
+  try {
+    const { name, mobileNumber, totalTime } = req.body;
     
-  //   if (!name || !amount) {
-  //     return res.status(400).json({ message: "Name and Amount are required" });
-  //   }
+    if (!name || !mobileNumber || !totalTime) {
+      return res.status(400).json({ message: "Name, Mobile Number, and Total Time are required" });
+    }
 
-  //   let qrCodeUrl = "";
-  //   if (req.file && req.file.location) {
-  //     qrCodeUrl = req.file.location; // Cloudflare R2 uploaded image URL
-  //   }
+    let qrCodeUrl = "";
+    if (req.file && req.file.location) {
+      qrCodeUrl = req.file.location; // Cloudflare R2 uploaded image URL
+    }
 
-  //   const newClaim = new LotteryClaim({
-  //     name,
-  //     amount,
-  //     gpayNumber,
-  //     qrCode: qrCodeUrl,
-  //     status: "Pending",
-  //   });
+    const newClaim = new LotteryClaim({
+      name,
+      mobileNumber,
+      totalTime,
+      qrCode: qrCodeUrl,
+      status: "Pending",
+    });
 
-  //   await newClaim.save();
+    await newClaim.save();
     
-  //   res.status(201).json({
-  //     message: "Lottery claim submitted successfully!",
-  //     claim: newClaim,
-  //   });
-  // } catch (error) {
-  //   console.error("Error creating lottery claim:", error);
-  //   res.status(500).json({ message: "Internal Server Error", error: error.message });
-  // }
+    res.status(201).json({
+      message: "Treasure Hunt details submitted successfully!",
+      claim: newClaim,
+    });
+  } catch (error) {
+    console.error("Error creating treasure hunt claim:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
 };
 
 // Get all claims (Admin only)
@@ -120,6 +118,42 @@ exports.updateSettings = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating lottery settings:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+// Get public leaderboard of completions (sorted by fastest time first)
+exports.getPublicLeaderboard = async (req, res) => {
+  try {
+    const claims = await LotteryClaim.find({}, "name totalTime status createdAt");
+    
+    // Sort logic: totalTime is stored as "MM:SS" or "HH:MM:SS".
+    const parseTimeToSeconds = (timeStr) => {
+      if (!timeStr) return Infinity;
+      const parts = timeStr.split(":").map(Number);
+      if (parts.some(isNaN)) return Infinity;
+      if (parts.length === 3) {
+        return parts[0] * 3600 + parts[1] * 60 + parts[2];
+      } else if (parts.length === 2) {
+        return parts[0] * 60 + parts[1];
+      }
+      return Infinity;
+    };
+
+    const sortedClaims = claims
+      .map(c => ({
+        _id: c._id,
+        name: c.name,
+        totalTime: c.totalTime,
+        status: c.status,
+        createdAt: c.createdAt,
+        seconds: parseTimeToSeconds(c.totalTime)
+      }))
+      .sort((a, b) => a.seconds - b.seconds);
+
+    res.status(200).json(sortedClaims);
+  } catch (error) {
+    console.error("Error fetching public leaderboard:", error);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
