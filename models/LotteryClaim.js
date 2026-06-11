@@ -1,23 +1,24 @@
 const mongoose = require("mongoose");
 
-const lotteryClaimSchema = new mongoose.Schema(
+const treasureHuntSchema = new mongoose.Schema(
   {
     name: {
       type: String,
       required: true,
       trim: true,
     },
-    amount: {
+    mobileNumber: {
       type: String,
       required: true,
       trim: true,
     },
-    gpayNumber: {
+    qrCode: {
       type: String,
       trim: true,
     },
-    qrCode: {
+    totalTime: {
       type: String,
+      required: true,
       trim: true,
     },
     status: {
@@ -31,6 +32,7 @@ const lotteryClaimSchema = new mongoose.Schema(
   }
 );
 
-const LotteryClaim = mongoose.model("LotteryClaim", lotteryClaimSchema);
+const TreasureHunt = mongoose.model("TreasureHunt", treasureHuntSchema, "TreasureHunt");
 
-module.exports = LotteryClaim;
+module.exports = TreasureHunt;
+
