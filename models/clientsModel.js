@@ -52,6 +52,17 @@ const clientSchema = new mongoose.Schema(
       index: true,
     },
 
+    isAuditClient: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    password: {
+      type: String,
+      trim: true,
+    },
+
     notes: {
       type: String,
       trim: true,

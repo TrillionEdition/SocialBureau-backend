@@ -31,6 +31,8 @@ const reelRoutes = require("./reelRoutes");
 const intakeRoutes = require("./intakeRoutes");
 const workflowRoutes = require("./workflowRoutes");
 
+const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
+
 const router = express.Router();
 
 router.use(express.json());
@@ -67,6 +69,7 @@ router.use("/posters", posterRoutes);
 router.use("/reels", reelRoutes);
 router.use("/workflow", workflowRoutes);
 router.use("/api/forms", formsRoutes);
+router.use("/api/audit-reports", auditReportRoutes);
 router.use("/", intakeRoutes);
 
 module.exports = router;
