@@ -74,7 +74,7 @@ exports.createOrder = async (req, res) => {
  */
 exports.verifyPayment = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, reportId } = req.body;
 
     const sign = razorpay_order_id + "|" + razorpay_payment_id;
     const expectedSign = crypto
@@ -85,8 +85,18 @@ exports.verifyPayment = async (req, res) => {
     if (razorpay_signature === expectedSign) {
       console.log("✅ Payment verification successful for order:", razorpay_order_id);
       
-      // 1. Update User Model
-      if (req.user && req.user.id) {
+      // If payment is for a specific Audit Report, update it
+      if (reportId) {
+        console.log("🔍 Attempting to mark AuditReport paid:", reportId);
+        const AuditReport = require("../modules/auditReports/auditReportModel");
+        const updatedReport = await AuditReport.findByIdAndUpdate(
+          reportId,
+          { isPaid: true },
+          { new: true }
+        );
+        console.log("📄 AuditReport Update Result:", updatedReport ? "SUCCESS" : "REPORT NOT FOUND");
+      } else if (req.user && req.user.id) {
+        // Otherwise, standard user/influencer workflow updates
         console.log("🔍 Attempting to update User ID:", req.user.id);
         const updatedUser = await User.findByIdAndUpdate(
           req.user.id, 
@@ -95,9 +105,6 @@ exports.verifyPayment = async (req, res) => {
         );
         console.log("👤 User Update Result:", updatedUser ? "SUCCESS" : "USER NOT FOUND");
         
-        // 2. Update or Create Partnership Model immediately
-        // Note: We ONLY set hasPaid to true. We DO NOT set category to influencer yet.
-        // The category only changes when the user submits the InfluencerDataForm.
         const updatedPartner = await Partnership.findOneAndUpdate(
           { user: req.user.id },
           { 
@@ -107,11 +114,9 @@ exports.verifyPayment = async (req, res) => {
           { upsert: true, new: true }
         );
         console.log("🤝 Partnership Payment Status Updated:", updatedPartner ? "SUCCESS" : "FAILED");
-
-        console.log("✅ Database sync complete for order:", razorpay_order_id);
-      } else {
-        console.error("❌ Auth Error: No user ID found in request during verification!");
       }
+
+      console.log("✅ Database sync complete for order:", razorpay_order_id);
 
       return res.status(200).json({
         success: true,
