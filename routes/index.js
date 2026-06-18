@@ -26,10 +26,12 @@ const mediaWaitlistRoutes = require("./mediaWaitlistRoutes");
 const formsRoutes = require("./formsRoutes");
 const ajnoraRouters = require("./ajnoraRoutes");
 const lotteryRoutes = require("./lotteryRoutes");
+const suntipsRoutes = require("./suntipsRoutes");
 const posterRoutes = require("./posterRoutes");
 const reelRoutes = require("./reelRoutes");
 const intakeRoutes = require("./intakeRoutes");
 const workflowRoutes = require("./workflowRoutes");
+const fifaRoutes = require("./fifaRoutes");
 
 const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
 
@@ -65,9 +67,11 @@ router.use("/api-leads", apiLeadRoutes);
 router.use("/media-waitlist", mediaWaitlistRoutes);
 router.use("/ajnora", ajnoraRouters);
 router.use("/lottery", lotteryRoutes);
+router.use("/suntips", suntipsRoutes);
 router.use("/posters", posterRoutes);
 router.use("/reels", reelRoutes);
 router.use("/workflow", workflowRoutes);
+router.use("/fifa", fifaRoutes);
 router.use("/api/forms", formsRoutes);
 router.use("/api/audit-reports", auditReportRoutes);
 router.use("/", intakeRoutes);

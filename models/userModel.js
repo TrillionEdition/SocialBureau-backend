@@ -136,6 +136,10 @@ const userSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    fifaPoints: {
+      type: Number,
+      default: 0,
+    },
 
     engagement: {
       likes: {

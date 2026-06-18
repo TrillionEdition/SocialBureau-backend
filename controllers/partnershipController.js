@@ -6,6 +6,8 @@ const path = require("path");
 const sendMail = require("../utils/sendMail");
 const googleService = require("../services/googleService");
 const User = require("../models/userModel");
+const mongoose = require("mongoose");
+
 
 const partnershipController = {
   // Create a new partnership
@@ -111,6 +113,18 @@ const partnershipController = {
       data: partner,
     });
   }),
+
+  // Check if a URL param is taken
+  checkSlugAvailability: asyncHandler(async (req, res) => {
+    const partner = await Partnership.findOne({ 
+      param: { $regex: new RegExp(`^${req.params.param}$`, "i") } 
+    });
+    res.json({
+      success: true,
+      data: partner || null,
+    });
+  }),
+
 
   // Update partnership
   updatePartner: asyncHandler(async (req, res) => {
@@ -382,11 +396,16 @@ const partnershipController = {
       
       let partner = await Partnership.findOne({ user: userId });
       
+      const userObjectId = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(userId)
+        : userId;
+
       // Check if param conflicts with another user's partnership
       const exists = await Partnership.findOne({ 
         param: { $regex: new RegExp(`^${param}$`, "i") },
-        user: { $nin: [userId, null, undefined] } // Conflict only if another user already owns it
+        user: { $nin: [userObjectId, null, undefined] } // Conflict only if another user already owns it
       });
+
       
       if (exists) {
         res.status(400);
