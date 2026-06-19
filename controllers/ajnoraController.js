@@ -5,7 +5,7 @@ const ajnoraController = {
   // Create new entry
   createEntry: async (req, res) => {
     try {
-        // Fields that need to be parsed from JSON strings because FormData stringifies them
+        //      Fields that need to be parsed from JSON strings because FormData stringifies them
         const jsonFields = [
           'partnersList', 
           'uploadedFiles', 
