@@ -38,8 +38,15 @@ app.use(
       }
     },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    optionsSuccessStatus: 200, // Some legacy browsers choke on 204
   })
 );
+
+// Handle OPTIONS preflight requests explicitly
+app.options("*", cors());
+
 
 app.use(express.json());
 app.use(cookieParser());
