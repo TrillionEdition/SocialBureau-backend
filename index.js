@@ -27,6 +27,30 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
+// ── Force CORS headers manually (survives Nginx proxy stripping) ──────────────
+// This runs before cors() and explicitly sets headers on every response so that
+// even if the reverse proxy overrides or drops cors() headers, these remain.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+    );
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-Requested-With"
+    );
+  }
+  // Respond immediately to preflight OPTIONS requests
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+  next();
+});
+
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -43,6 +67,7 @@ app.use(
     optionsSuccessStatus: 200, // Some legacy browsers choke on 204
   })
 );
+
 
 
 app.use(express.json());
