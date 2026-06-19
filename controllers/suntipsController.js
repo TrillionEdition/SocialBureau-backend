@@ -1,4 +1,5 @@
 const SuntipsClaim = require("../models/SuntipsClaim");
+const SuntipsSettings = require("../models/SuntipsSettings");
 
 // Create a claim for a tea pack
 exports.createClaim = async (req, res) => {
@@ -66,6 +67,45 @@ exports.updateClaimStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating Suntips claim status:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+// Get Suntips settings (public - for the spin page to check outOfStock status)
+exports.getSettings = async (req, res) => {
+  try {
+    let settings = await SuntipsSettings.findOne();
+    if (!settings) {
+      // Create default settings if none exist
+      settings = await SuntipsSettings.create({ outOfStock: false });
+    }
+    res.status(200).json(settings);
+  } catch (error) {
+    console.error("Error fetching Suntips settings:", error);
+    res.status(500).json({ message: "Internal Server Error", error: error.message });
+  }
+};
+
+// Update outOfStock flag (Admin only)
+exports.updateStockStatus = async (req, res) => {
+  try {
+    const { outOfStock } = req.body;
+
+    if (typeof outOfStock !== "boolean") {
+      return res.status(400).json({ message: "outOfStock must be a boolean" });
+    }
+
+    let settings = await SuntipsSettings.findOne();
+    if (!settings) {
+      settings = new SuntipsSettings({ outOfStock });
+    } else {
+      settings.outOfStock = outOfStock;
+    }
+    await settings.save();
+
+    res.status(200).json({ message: `Stock status updated`, outOfStock: settings.outOfStock });
+  } catch (error) {
+    console.error("Error updating Suntips stock status:", error);
     res.status(500).json({ message: "Internal Server Error", error: error.message });
   }
 };
