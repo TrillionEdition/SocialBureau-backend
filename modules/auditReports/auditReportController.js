@@ -81,7 +81,7 @@ const auditReportController = {
       throw new Error("PDF file is required");
     }
 
-    const { title, description, category, auditPeriod, clientId, status } = req.body;
+    const { title, description, category, auditPeriod, clientId, status, amt } = req.body;
 
     if (!title || !category || !auditPeriod || !clientId) {
       res.status(400);
@@ -94,6 +94,8 @@ const auditReportController = {
       throw new Error("Client not found");
     }
 
+    const parsedAmt = amt ? parseFloat(amt) : undefined;
+
     const report = await AuditReport.create({
       title,
       description,
@@ -105,6 +107,7 @@ const auditReportController = {
       uploadedBy: req.user.name || req.user.email,
       clientId,
       status: status || "published",
+      amt: !isNaN(parsedAmt) ? parsedAmt : undefined,
     });
 
     res.status(201).json({
@@ -116,11 +119,17 @@ const auditReportController = {
 
   // PUT /api/audit-reports/admin/report/:reportId
   updateReportAdmin: asyncHandler(async (req, res) => {
-    const { title, description, category, auditPeriod, status } = req.body;
+    const { title, description, category, auditPeriod, status, amt } = req.body;
+
+    const update = { title, description, category, auditPeriod, status };
+    if (amt !== undefined) {
+      const parsedAmt = parseFloat(amt);
+      if (!isNaN(parsedAmt)) update.amt = parsedAmt;
+    }
 
     const report = await AuditReport.findByIdAndUpdate(
       req.params.reportId,
-      { title, description, category, auditPeriod, status },
+      update,
       { new: true, runValidators: true }
     );
 
@@ -227,7 +236,7 @@ const auditReportController = {
 
       if (!report.isPaid) {
         res.status(402);
-        throw new Error("Payment required. Please complete the ₹1500 payment to download this report.");
+        throw new Error("Payment required. Please complete the payment to download this report.");
       }
     }
 
