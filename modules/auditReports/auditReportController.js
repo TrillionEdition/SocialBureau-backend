@@ -240,8 +240,8 @@ const auditReportController = {
       }
     }
 
-    // Redirect to the Cloudflare R2 public URL
-    res.redirect(report.pdfUrl);
+    // Return the Cloudflare R2 public URL
+    res.json({ success: true, url: report.pdfUrl });
   }),
 
   // POST /api/audit-reports/admin/clients
