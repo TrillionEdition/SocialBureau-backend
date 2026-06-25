@@ -8,6 +8,7 @@ const upload = require("../../middlewares/cloudflare");
 // User / Client routes
 router.get("/my-reports", userAuthentication, auditReportController.getMyReports);
 router.get("/download/:reportId", userAuthentication, auditReportController.downloadReport);
+router.get("/viewer/:reportId", userAuthentication, auditReportController.viewerReport);
 
 // Admin routes
 router.get("/admin/clients", userAuthentication, adminAuthentication, auditReportController.getClientsAdmin);
