@@ -9,15 +9,16 @@ dns.setDefaultResultOrder("ipv4first");
  * Supports Gmail (Local) and SendGrid (Production/Render)
  * Port 2525 is used for SendGrid to bypass Render's firewall blocks.
  */
-const sendMail = async ({ to, subject, html }) => {
-  console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
-  let transporter;
-
+/**
+ * Creates a transporter instance for sending emails
+ * Used by emailService.js for direct transporter access
+ */
+const createTransporter = () => {
   // 🛡️ MODE 1: SendGrid (Recommended for Render)
   if (process.env.SENDGRID_API_KEY) {
-    console.log("🚀 [MAILER] Using SendGrid on Port 2525 (Render Optimized)");
-    transporter = nodemailer.createTransport({
+    console.log("🚀 [MAILER] Initializing SendGrid on Port 2525 (Render Optimized)");
+    return nodemailer.createTransport({
       host: "smtp.sendgrid.net",
       port: 2525, // Bypasses Render's firewall blocks
       auth: {
@@ -28,8 +29,8 @@ const sendMail = async ({ to, subject, html }) => {
   } 
   // 🛡️ MODE 2: Gmail (Fallback/Local)
   else {
-    console.log("⏱️  [MAILER] No SendGrid key found. Falling back to Gmail...");
-    transporter = nodemailer.createTransport({
+    console.log("⏱️  [MAILER] No SendGrid key found. Initializing Gmail fallback...");
+    return nodemailer.createTransport({
       service: "gmail",
       auth: {
         user: process.env.MAIL_USER,
@@ -37,6 +38,13 @@ const sendMail = async ({ to, subject, html }) => {
       },
     });
   }
+};
+
+// Create transporter instance for export
+const transporter = createTransporter();
+
+const sendMail = async ({ to, subject, html }) => {
+  console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
   const mailOptions = {
     from: `"SocialBureau" <${process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER}>`,
@@ -62,3 +70,5 @@ const sendMail = async ({ to, subject, html }) => {
 };
 
 module.exports = sendMail;
+module.exports.transporter = transporter;
+module.exports.createTransporter = createTransporter;
