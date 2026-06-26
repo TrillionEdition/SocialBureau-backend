@@ -34,7 +34,7 @@ async function invokeGemini(prompt) {
   }
 
   try {
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash', generationConfig, safetySettings });
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-lite-latest', generationConfig, safetySettings });
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const jsonText = response.text().replace(/```json\n|```/g, '').trim();
@@ -66,7 +66,7 @@ async function invokeGeminiText(prompt) {
     delete textConfig.responseMimeType; // Allow plain text
 
     const model = genAI.getGenerativeModel({
-      model: 'gemini-1.5-flash',
+      model: 'gemini-flash-lite-latest',
       generationConfig: textConfig,
       safetySettings
     });

@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-
+// Trigger restart to reload env
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`;
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent`;
 
 // ── POST /api/ai/claude ────────────────────────────────────────────────────────
 // Accepts the same body shape the frontend already sends (Anthropic format)
