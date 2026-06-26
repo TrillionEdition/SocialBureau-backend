@@ -54,6 +54,11 @@ const auditReportSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    amt: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
   },
   {
     timestamps: true,

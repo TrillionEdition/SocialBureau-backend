@@ -74,7 +74,24 @@ exports.createOrder = async (req, res) => {
  */
 exports.verifyPayment = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, reportId } = req.body;
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, reportId, amt, free } = req.body;
+
+    // If marked as free (zero-amount), skip signature verification and mark paid directly
+    if (free === true || (amt !== undefined && Number(amt) === 0)) {
+      console.log("Free payment flow detected for report:", reportId);
+      if (reportId) {
+        const AuditReport = require("../modules/auditReports/auditReportModel");
+        const update = { isPaid: true };
+        if (amt !== undefined) {
+          const parsedAmt = parseFloat(amt);
+          if (!isNaN(parsedAmt)) update.amt = parsedAmt;
+        }
+        const updatedReport = await AuditReport.findByIdAndUpdate(reportId, update, { new: true });
+        console.log("📄 AuditReport Free Update Result:", updatedReport ? "SUCCESS" : "REPORT NOT FOUND");
+      }
+
+      return res.status(200).json({ success: true, message: "Marked as paid (free)" });
+    }
 
     const sign = razorpay_order_id + "|" + razorpay_payment_id;
     const expectedSign = crypto
@@ -89,9 +106,14 @@ exports.verifyPayment = async (req, res) => {
       if (reportId) {
         console.log("🔍 Attempting to mark AuditReport paid:", reportId);
         const AuditReport = require("../modules/auditReports/auditReportModel");
+        const update = { isPaid: true };
+        if (amt !== undefined) {
+          const parsedAmt = parseFloat(amt);
+          if (!isNaN(parsedAmt)) update.amt = parsedAmt;
+        }
         const updatedReport = await AuditReport.findByIdAndUpdate(
           reportId,
-          { isPaid: true },
+          update,
           { new: true }
         );
         console.log("📄 AuditReport Update Result:", updatedReport ? "SUCCESS" : "REPORT NOT FOUND");

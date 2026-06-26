@@ -81,7 +81,7 @@ const auditReportController = {
       throw new Error("PDF file is required");
     }
 
-    const { title, description, category, auditPeriod, clientId, status } = req.body;
+    const { title, description, category, auditPeriod, clientId, status, amt } = req.body;
 
     if (!title || !category || !auditPeriod || !clientId) {
       res.status(400);
@@ -94,6 +94,8 @@ const auditReportController = {
       throw new Error("Client not found");
     }
 
+    const parsedAmt = amt ? parseFloat(amt) : undefined;
+
     const report = await AuditReport.create({
       title,
       description,
@@ -105,6 +107,7 @@ const auditReportController = {
       uploadedBy: req.user.name || req.user.email,
       clientId,
       status: status || "published",
+      amt: !isNaN(parsedAmt) ? parsedAmt : undefined,
     });
 
     res.status(201).json({
@@ -116,11 +119,17 @@ const auditReportController = {
 
   // PUT /api/audit-reports/admin/report/:reportId
   updateReportAdmin: asyncHandler(async (req, res) => {
-    const { title, description, category, auditPeriod, status } = req.body;
+    const { title, description, category, auditPeriod, status, amt } = req.body;
+
+    const update = { title, description, category, auditPeriod, status };
+    if (amt !== undefined) {
+      const parsedAmt = parseFloat(amt);
+      if (!isNaN(parsedAmt)) update.amt = parsedAmt;
+    }
 
     const report = await AuditReport.findByIdAndUpdate(
       req.params.reportId,
-      { title, description, category, auditPeriod, status },
+      update,
       { new: true, runValidators: true }
     );
 
@@ -227,12 +236,71 @@ const auditReportController = {
 
       if (!report.isPaid) {
         res.status(402);
-        throw new Error("Payment required. Please complete the ₹1500 payment to download this report.");
+        throw new Error("Payment required. Please complete the payment to download this report.");
       }
     }
 
-    // Redirect to the Cloudflare R2 public URL
-    res.redirect(report.pdfUrl);
+    // Return the Cloudflare R2 public URL
+    res.json({ success: true, url: report.pdfUrl });
+  }),
+
+  // GET /api/audit-reports/viewer/:reportId - Secure document viewing endpoint
+  viewerReport: asyncHandler(async (req, res) => {
+    const report = await AuditReport.findById(req.params.reportId);
+    if (!report) {
+      res.status(404);
+      throw new Error("Report not found");
+    }
+
+    const role = req.user.role ? req.user.role.toLowerCase() : "";
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      res.status(404);
+      throw new Error("User not found");
+    }
+
+    const clientIds = user.clients ? user.clients.map((id) => id.toString()) : [];
+    const matchedClient = await Client.findOne({ email: user.email.toLowerCase().trim() });
+    if (matchedClient) {
+      clientIds.push(matchedClient._id.toString());
+    }
+
+    const uniqueClientIds = [...new Set(clientIds)];
+    const isClient = uniqueClientIds.length > 0;
+
+    // Admins and partners (with no client company associations) are exempt
+    const isAdminOrPartner = role === "admin" || ((role === "partner" || role === "partnership") && !isClient);
+
+    if (!isAdminOrPartner) {
+      if (!uniqueClientIds.includes(report.clientId.toString())) {
+        res.status(403);
+        throw new Error("Access denied. You can only view reports assigned to your account.");
+      }
+
+      if (!report.isPaid) {
+        res.status(402);
+        throw new Error("Payment required. Please complete the payment to view this report.");
+      }
+    }
+
+    // Return the Cloudflare R2 public URL with security headers
+    res.set({
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "SAMEORIGIN",
+      "Cache-Control": "private, max-age=3600",
+    });
+
+    res.json({
+      success: true,
+      url: report.pdfUrl,
+      metadata: {
+        title: report.title,
+        category: report.category,
+        createdAt: report.createdAt,
+        fileSize: report.pdfSize,
+        fileName: report.pdfFileName,
+      },
+    });
   }),
 
   // POST /api/audit-reports/admin/clients

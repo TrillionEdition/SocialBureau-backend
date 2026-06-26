@@ -8,6 +8,7 @@ const Tool = require("../models/toolModel")
 const Client = require("../models/clientsModel")
 const Subscriber = require("../models/Subscriber");
 const sendMail = require("../utils/sendMail");
+const emailService = require("../services/emailService");
 const blogJobTemplate = require("../utils/blogEmailTemplate");
 const { getLatestPublishedBlog, getLatestActiveJob } = require("../services/blogService");
 
@@ -518,6 +519,15 @@ const userController = {
       secure: process.env.NODE_ENV === "production",
     });
 
+    // 📧 Send login thank you email asynchronously (non-blocking)
+    // This ensures email failures don't affect the login response
+    emailService.sendLoginThankYouEmail({
+      name: userExist.name,
+      email: userExist.email,
+    }).catch((err) => {
+      console.error(`⚠️ [LOGIN] Email send error (non-blocking): ${err.message}`);
+    });
+
     // ✅ SEND FLAGS TO FRONTEND
     res.json({
       message: "Login successful",
@@ -661,6 +671,17 @@ const userController = {
       sameSite: "lax",
       secure: process.env.NODE_ENV === "production",
     });
+
+    // 📧 Send login thank you email for returning users (non-blocking)
+    // Only send email for returning users, not for new registrations
+    if (!isNewUser) {
+      emailService.sendLoginThankYouEmail({
+        name: user.name,
+        email: user.email,
+      }).catch((err) => {
+        console.error(`⚠️ [GOOGLE LOGIN] Email send error (non-blocking): ${err.message}`);
+      });
+    }
 
     res.json({
       message: isNewUser ? "Registration via Google successful" : "Login successful",

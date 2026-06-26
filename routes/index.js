@@ -33,6 +33,7 @@ const reelRoutes = require("./reelRoutes");
 const intakeRoutes = require("./intakeRoutes");
 const workflowRoutes = require("./workflowRoutes");
 const fifaRoutes = require("./fifaRoutes");
+const aiProxy = require("./aiProxy");
 
 const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
 
@@ -75,6 +76,7 @@ router.use("/reels", reelRoutes);
 router.use("/workflow", workflowRoutes);
 router.use("/fifa", fifaRoutes);
 router.use("/api/forms", formsRoutes);
+router.use("/api/ai", aiProxy);
 router.use("/api/audit-reports", auditReportRoutes);
 router.use("/", intakeRoutes);
 
