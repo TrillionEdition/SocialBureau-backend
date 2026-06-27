@@ -43,6 +43,10 @@ app.use((req, res, next) => {
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization, X-Requested-With"
     );
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Disposition"
+    );
   }
   // Respond immediately to preflight OPTIONS requests
   if (req.method === "OPTIONS") {
@@ -64,6 +68,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    exposedHeaders: ["Content-Disposition"],
     optionsSuccessStatus: 200, // Some legacy browsers choke on 204
   })
 );
