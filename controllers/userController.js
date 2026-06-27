@@ -83,8 +83,10 @@ const userController = {
     const { clickupId, clickupListId, clickupChatViewId, clickupToken, email, name, password, role, emp_id, doj, rate, phone, isEmployee, captchaToken } = req.body;
     console.log(" Register attempt with email:", email);
 
-    // Verify Cloudflare Turnstile Captcha
-    if (process.env.CAPTCHA_SECRET_KEY) {
+    // Verify Cloudflare Turnstile Captcha (only on production domain)
+    const origin = req.headers.origin || req.headers.referer || "";
+    const isProdOrigin = origin.includes("socialbureau.in");
+    if (process.env.CAPTCHA_SECRET_KEY && isProdOrigin) {
       if (!captchaToken) {
         res.status(400);
         throw new Error("Captcha verification is required");
@@ -433,8 +435,10 @@ const userController = {
   login: asyncHandler(async (req, res) => {
     const { email, clickupId, password, captchaToken } = req.body;
 
-    // Verify Cloudflare Turnstile Captcha
-    if (process.env.CAPTCHA_SECRET_KEY) {
+    // Verify Cloudflare Turnstile Captcha (only on production domain)
+    const origin = req.headers.origin || req.headers.referer || "";
+    const isProdOrigin = origin.includes("socialbureau.in");
+    if (process.env.CAPTCHA_SECRET_KEY && isProdOrigin) {
       if (!captchaToken) {
         res.status(400);
         throw new Error("Captcha verification is required");
