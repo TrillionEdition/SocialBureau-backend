@@ -8,7 +8,7 @@ const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const helmet = require("helmet");
 const path = require("path");
-
+const MongoStore = require("connect-mongo");
 const app = express();
 
 const allowedOrigins = [
@@ -96,6 +96,11 @@ app.set("trust proxy", 1);
 app.use(
   session({
     name: "sb.sid",
+    store: MongoStore.create({
+      mongoUrl: process.env.MONGO_URI,
+      collectionName: "sessions",
+      ttl: 14 * 24 * 60 * 60, // 14 days, adjust as needed
+    }),
     secret: process.env.SESSION_SECRET || "fallback-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
