@@ -8,7 +8,7 @@ const cookieParser = require("cookie-parser");
 const session = require("express-session");
 const helmet = require("helmet");
 const path = require("path");
-const MongoStore = require("connect-mongo");
+const MongoStore = require("connect-mongo").default || require("connect-mongo");
 const app = express();
 
 const allowedOrigins = [
