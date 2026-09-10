@@ -5,6 +5,9 @@ const userAuthentication = require("../middlewares/userAuthentication");
 const adminAuthentication = require("../middlewares/adminAuthentication");
 const upload = require("../middlewares/cloudflare");
 
+// Debug: confirm this router is loaded at server start
+console.log("🔁 partnershipRoutes loaded");
+
 partnershipRoutes.get("/student-stats", partnershipController.getStudentStats);
 partnershipRoutes.get("/dashboard-stats", partnershipController.getDashboardStats);
 partnershipRoutes.post("/schedule-meeting", partnershipController.scheduleMeeting);
