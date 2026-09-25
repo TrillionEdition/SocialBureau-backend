@@ -10,10 +10,22 @@ const RESUME_PACKAGE_PRICE = 199; // INR
 // const RESUME_PACKAGE_PRICE = 2;
 const RESUME_PACKAGE_DOWNLOADS = 10;
 
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID,
-  key_secret: process.env.RAZORPAY_KEY_SECRET,
-});
+// Lazily initialize Razorpay so requiring controllers doesn't crash when
+// RAZORPAY env vars are not present (useful for local dev or partial installs).
+let razorpay = null;
+if (process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET) {
+  try {
+    razorpay = new Razorpay({
+      key_id: process.env.RAZORPAY_KEY_ID,
+      key_secret: process.env.RAZORPAY_KEY_SECRET,
+    });
+  } catch (initErr) {
+    console.warn('Razorpay init failed:', initErr && initErr.message);
+    razorpay = null;
+  }
+} else {
+  console.warn('Razorpay env not set; payment endpoints will return 500 until configured.');
+}
 
 const BASIC_FIELDS = ResumeListing.BASIC_FIELDS;
 

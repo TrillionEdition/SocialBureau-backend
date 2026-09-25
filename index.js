@@ -9,6 +9,7 @@ const session = require("express-session");
 const helmet = require("helmet");
 const path = require("path");
 const MongoStore = require("connect-mongo").default || require("connect-mongo");
+const { apiLimiter } = require("./middlewares/rateLimiter");
 const app = express();
 
 const allowedOrigins = [
@@ -92,6 +93,9 @@ app.use((req, res, next) => {
 });
 
 app.set("trust proxy", 1);
+
+// Global rate limiting (Redis-backed, falls back to in-memory when Redis is down)
+app.use(apiLimiter);
 
 app.use(
   session({

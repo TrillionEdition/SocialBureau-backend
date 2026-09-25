@@ -3,15 +3,16 @@ const userController = require("../controllers/userController")
 const upload = require("../middlewares/cloudflare")
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
+const { loginLimiter } = require("../middlewares/rateLimiter");
 const userRouter = express.Router()
 
-userRouter.post('/register', upload.fields([
+userRouter.post('/register', loginLimiter, upload.fields([
     { name: 'coverImage', maxCount: 1 },
     { name: 'idCard', maxCount: 1 },
     { name: 'toolIcons', maxCount: 20 }
 ], 'socialbureau-media/images/users'), userController.register)
-userRouter.post("/login", userController.login)
-userRouter.post("/google-login", userController.googleLogin)
+userRouter.post("/login", loginLimiter, userController.login)
+userRouter.post("/google-login", loginLimiter, userController.googleLogin)
 userRouter.get('/logout', userController.logout)
 userRouter.get('/team', userController.getUsers)
 userRouter.put('/tools', userController.updateTool)
