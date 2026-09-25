@@ -117,6 +117,8 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/assets", express.static(path.join(__dirname, "assets")));
 
 // ================== ROUTES ==================
+// Support deployments behind a path prefix like /socialbureau (reverse proxy)
+app.use("/socialbureau", router);
 app.use("/", router);
 
 // ================== ERROR HANDLING ==================
@@ -135,22 +137,15 @@ const startServer = async () => {
         { email: { $in: ["ceo@socialbureau.in", "web@socialbureau.in", "admin@socialbureau.in", "webjr.socialbureau@gmail.com", "pmo.socialbureau@gmail.com"] } },
         { $set: { isClickUpVerified: true } }
       );
-      console.log(`✅ Auto-verified ClickUp badge for ${result.modifiedCount} users`);
     } catch (dbErr) {
       console.error("⚠️ Failed to auto-verify ClickUp badge users on startup:", dbErr.message);
     }
     require("./cron/newsletterCron");
     require("./cron/meetingCron");
-    require("./cron/fifaCron");
+    // FIFA cron disabled to prevent automatic syncs. File retained.
+    // require("./cron/fifaCron");
     const { initializeBillingCrons } = require("./cron/billingCron");
     initializeBillingCrons();
-
-    app.listen(PORT, () => {
-      console.log(`\n${"=".repeat(50)}`);
-      console.log(`🚀 SOCIAL BUREAU BACKEND IS NOW ONLINE ON PORT ${PORT}`);
-      console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`${"=".repeat(50)}\n`);
-    });
   } catch (err) {
     console.error("❌ Critical Failure: Could not start server due to DB connection error.");
     console.error(err);

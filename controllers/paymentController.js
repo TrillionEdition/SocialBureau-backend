@@ -14,13 +14,7 @@ const razorpay = new Razorpay({
 // Debug: Check if keys are loaded
 if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
   console.error("❌ CRITICAL: Razorpay Keys are missing from .env!");
-} else {
-  try {
-    console.log("✅ Razorpay Keys loaded successfully (ID starts with:", String(process.env.RAZORPAY_KEY_ID).substring(0, 8), ")");
-  } catch (e) {
-    console.log("✅ Razorpay Keys loaded");
-  }
-}
+} 
 
 /**
  * @desc    Create a new Razorpay Order

@@ -30,7 +30,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.
     key: privateKey,
     scopes: SCOPES,
   });
-  console.log("🤖 Using Service Account for Google Services");
 }
 
 const sheetsClient = sheets({ version: "v4", auth });

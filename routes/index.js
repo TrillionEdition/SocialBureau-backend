@@ -25,14 +25,16 @@ const apiLeadRoutes = require("./apiLeadRoutes");
 const mediaWaitlistRoutes = require("./mediaWaitlistRoutes");
 const formsRoutes = require("./formsRoutes");
 const ajnoraRouters = require("./ajnoraRoutes");
-const lotteryRoutes = require("./lotteryRoutes");
+// Lottery routes temporarily disabled — kept for future restoration.
+// const lotteryRoutes = require("./lotteryRoutes");
 const suntipsRoutes = require("./suntipsRoutes");
 const chocochiRoutes = require("./chocochiRoutes");
 const posterRoutes = require("./posterRoutes");
 const reelRoutes = require("./reelRoutes");
 const intakeRoutes = require("./intakeRoutes");
 const workflowRoutes = require("./workflowRoutes");
-const fifaRoutes = require("./fifaRoutes");
+// FIFA routes temporarily disabled — kept for future restoration.
+// const fifaRoutes = require("./fifaRoutes");
 const aiProxy = require("./aiProxy");
 const pdfRoutes = require("./pdfRoutes");
 const imageRoutes = require("./imageRoutes");
@@ -73,13 +75,15 @@ router.use('/resume', resumeRoutes);
 router.use("/api-leads", apiLeadRoutes);
 router.use("/media-waitlist", mediaWaitlistRoutes);
 router.use("/ajnora", ajnoraRouters);
-router.use("/lottery", lotteryRoutes);
+// Disabled lottery endpoints to avoid exposing prize/claim APIs
+// router.use("/lottery", lotteryRoutes);
 router.use("/suntips", suntipsRoutes);
 router.use("/chocochi", chocochiRoutes);
 router.use("/posters", posterRoutes);
 router.use("/reels", reelRoutes);
 router.use("/workflow", workflowRoutes);
-router.use("/fifa", fifaRoutes);
+// Disabled fifa endpoints to avoid exposing prediction/match APIs
+// router.use("/fifa", fifaRoutes);
 router.use("/api/forms", formsRoutes);
 router.use("/api/ai", aiProxy);
 router.use("/api/pdf", pdfRoutes);

@@ -17,9 +17,6 @@ async function connectDB() {
       throw new Error("MONGO_URI not set in environment");
     }
 
-    console.log("🔌 Attempting MongoDB connection...");
-    console.log("📍 MongoDB URI (masked):", process.env.MONGO_URI.replace(/:[^:]*@/, ":****@"));
-
     const opts = {
       // Enable Mongoose buffering commands while the connection is being established
       // This prevents "MongooseError: Cannot call find() before initial connection is complete"
@@ -31,7 +28,6 @@ async function connectDB() {
     };
 
     globalAny._mongo.promise = mongoose.connect(process.env.MONGO_URI, opts).then((mongooseInstance) => {
-      console.log("✅ New MongoDB connection established successfully");
       return mongooseInstance;
     });
   }

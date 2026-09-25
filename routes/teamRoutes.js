@@ -1,7 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const mongoose = require("mongoose");
-console.log("TEAM ROUTES FILE LOADED SUCCESSFULLY");
 const userAuthentication = require("../middlewares/userAuthentication");
 const TeamMember = require("../models/teamMemberModel");
 const User = require("../models/userModel");

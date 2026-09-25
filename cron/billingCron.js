@@ -151,11 +151,9 @@ const scheduleStatusUpdate = () => {
 
 // Initialize all crons
 const initializeBillingCrons = () => {
-  console.log("Initializing billing cron jobs...");
   scheduleStatusUpdate();
   schedulePaymentReminders();
   scheduleOverdueReminders();
-  console.log("Billing cron jobs initialized");
 };
 
 module.exports = {
