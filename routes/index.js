@@ -38,6 +38,7 @@ const pdfRoutes = require("./pdfRoutes");
 const imageRoutes = require("./imageRoutes");
 const billingRoutes = require("./billingRoutes");
 const subscriptionRoutes = require("./subscriptionRoutes");
+const resumeMarketplaceRoutes = require("./resumeMarketplaceRoutes");
 
 const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
 
@@ -86,6 +87,7 @@ router.use("/api/image", imageRoutes);
 router.use("/api/audit-reports", auditReportRoutes);
 router.use("/api/billing", billingRoutes);
 router.use("/api/subscription", subscriptionRoutes);
+router.use("/api/resume-marketplace", resumeMarketplaceRoutes);
 router.use("/", intakeRoutes);
 
 module.exports = router;
