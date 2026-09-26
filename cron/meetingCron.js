@@ -5,7 +5,6 @@ const googleService = require("../services/googleService");
 
 // Run every minute to check for upcoming meetings
 cron.schedule("* * * * *", async () => {
-  console.log("🕒 Running Meeting Reminder Cron...");
   
   try {
     const now = new Date();

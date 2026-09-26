@@ -163,7 +163,6 @@ const blogController = {
   getBlogs: expressAsyncHandler(async (req, res) => {
     try {
       const { category, limit = 10, published } = req.query;
-      console.log('📚 getBlogs called with params:', { category, limit, published });
 
       let query = {};
       if (published === 'all') {
@@ -178,13 +177,10 @@ const blogController = {
         query.category = category;
       }
 
-      console.log('🔍 Querying blogs with:', query);
-
       // Redis caching
       const cacheKey = `blogs:list:${JSON.stringify(query)}:${limit}`;
       const cachedData = await getCache(cacheKey);
       if (cachedData) {
-        console.log('⚡ Redis Cache Hit: getBlogs');
         return res.json({ success: true, data: cachedData });
       }
 
@@ -192,8 +188,6 @@ const blogController = {
         .sort('-createdAt')
         .limit(parseInt(limit))
         .lean();
-
-      console.log(`✅ Found ${blogs.length} blogs`);
 
       // Cache the result
       await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
@@ -263,7 +257,6 @@ const blogController = {
       const cacheKey = `blog:${normalizedSlug}`;
       const cachedData = await getCache(cacheKey);
       if (cachedData) {
-        console.log('⚡ Redis Cache Hit: getBlogBySlug');
         return res.json({ success: true, data: cachedData });
       }
 

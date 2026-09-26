@@ -150,6 +150,11 @@ const startServer = async () => {
     // require("./cron/fifaCron");
     const { initializeBillingCrons } = require("./cron/billingCron");
     initializeBillingCrons();
+
+    app.listen(PORT, () => {
+      console.log(`SOCIAL BUREAU BACKEND IS NOW ONLINE ON PORT ${PORT}`);
+      console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
+    });
   } catch (err) {
     console.error("❌ Critical Failure: Could not start server due to DB connection error.");
     console.error(err);
