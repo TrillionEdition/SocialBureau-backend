@@ -127,8 +127,6 @@ app.use("/", router);
 
 // ================== ERROR HANDLING ==================
 app.use(errorHandler);
-
-// ================== START SERVER ==================
 const PORT = process.env.PORT || 5000;
 
 const startServer = async () => {
@@ -161,7 +159,5 @@ const startServer = async () => {
     process.exit(1);
   }
 };
-
 startServer();
-
 module.exports = app;
