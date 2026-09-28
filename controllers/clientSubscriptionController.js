@@ -312,22 +312,18 @@ exports.getAllPaymentHistory = async (req, res) => {
   }
 };
 
-// ─── Client: Get own subscription ───────────────────────────────────────────
+// ─── Client: Get own subscriptions (all of them) ────────────────────────────
 exports.getMySubscription = async (req, res) => {
   try {
-    const subscription = await ClientSubscription.findOne({
+    const subscriptions = await ClientSubscription.find({
       clientId: req.user.id,
       isDeleted: false,
     }).sort({ createdAt: -1 });
 
-    if (!subscription) {
-      return res.json({ data: null });
-    }
-
-    res.json({ data: subscription });
+    res.json({ data: subscriptions });
   } catch (error) {
-    console.error("Error fetching my subscription:", error);
-    res.status(500).json({ error: "Failed to fetch subscription" });
+    console.error("Error fetching my subscriptions:", error);
+    res.status(500).json({ error: "Failed to fetch subscriptions" });
   }
 };
 
