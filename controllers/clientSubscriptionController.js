@@ -98,17 +98,6 @@ exports.createSubscription = async (req, res) => {
       return res.status(404).json({ error: "Client not found" });
     }
 
-    const existing = await ClientSubscription.findOne({
-      clientId,
-      isDeleted: false,
-      status: { $nin: ["cancelled", "completed", "expired"] },
-    });
-    if (existing) {
-      return res.status(400).json({
-        error: "This client already has an active/pending subscription",
-      });
-    }
-
     let razorpaySub;
 
     if (razorpaySubscriptionId) {
