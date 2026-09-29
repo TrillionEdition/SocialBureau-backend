@@ -6,6 +6,7 @@ const upload = multer({ dest: 'uploads/', limits: { fileSize: 20 * 1024 * 1024 }
 
 
 const userAuthentication = require("../middlewares/userAuthentication");
+const { clickupMemberLimiter } = require("../middlewares/rateLimiter");
 
 const { clickupStorage, getUserConfig } = clickupController;
 
@@ -25,8 +26,8 @@ const authWithContext = [userAuthentication, clickupContext];
 
 clickupRoutes.get('/tasks', authWithContext, clickupController.getTasks);
 clickupRoutes.get('/tasks/:taskId', authWithContext, clickupController.getTaskById);
-clickupRoutes.get('/member-details', authWithContext, clickupController.getMemberDetails);
-clickupRoutes.get('/public-member-details', clickupController.getPublicMemberDetails);
+clickupRoutes.get('/member-details', clickupMemberLimiter, authWithContext, clickupController.getMemberDetails);
+clickupRoutes.get('/public-member-details', clickupMemberLimiter, clickupController.getPublicMemberDetails);
 // OAuth connect flow for ClickUp (start + callback)
 clickupRoutes.get('/oauth/start', userAuthentication, clickupController.startOAuth);
 clickupRoutes.get('/oauth/callback', userAuthentication, clickupController.handleOAuthCallback);

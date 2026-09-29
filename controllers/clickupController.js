@@ -15,6 +15,48 @@ const clickupStorage = new AsyncLocalStorage();
 const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN;
 const TEAM_ID = "9014733918";
 const LIST_ID = process.env.CLICKUP_NEW_LIST_ID || process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
+const CLICKUP_CACHE_TTL_SECONDS = 120;
+
+const parseMemberDetailsQuery = ({ slug, month, year }) => {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  if (typeof slug !== "string" || !/^[a-z0-9-]+$/.test(slug)) return null;
+  if (month !== undefined && (typeof month !== "string" || !/^\d+$/.test(month))) return null;
+  if (year !== undefined && (typeof year !== "string" || !/^\d{4}$/.test(year))) return null;
+
+  const monthNumber = month === undefined ? now.getMonth() + 1 : Number(month);
+  const yearNumber = year === undefined ? currentYear : Number(year);
+  if (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12 ||
+      !Number.isInteger(yearNumber) || yearNumber < currentYear - 5 || yearNumber > currentYear) {
+    return null;
+  }
+
+  return { slug, month: monthNumber - 1, year: yearNumber };
+};
+
+const getCachedClickUp = async (url, token) => {
+  if (!token) throw new Error("ClickUp token is not configured");
+
+  const cacheKey = `clickup:member:${crypto.createHash("sha256").update(`${token}:${url}`).digest("hex")}`;
+  const cachedData = await getCache(cacheKey);
+  if (cachedData !== null) return { data: cachedData };
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const response = await axios.get(url, {
+        headers: { Authorization: token },
+        timeout: 8000,
+      });
+      await setCache(cacheKey, response.data, CLICKUP_CACHE_TTL_SECONDS);
+      return response;
+    } catch (error) {
+      const status = error.response?.status;
+      const retryable = !error.response || status === 408 || status === 429 || status >= 500;
+      if (attempt === 2 || !retryable) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+};
 
 // Axios request interceptor to dynamically set authorization token
 axios.interceptors.request.use((config) => {
@@ -1187,12 +1229,9 @@ const clickupController = {
 
   getMemberDetails: expressAsyncHandler(async (req, res) => {
     try {
-      const { slug, month, year } = req.query;
-      if (!slug) {
-        return res.status(400).json({ message: "Slug not provided" });
-      }
-
-      console.log("Fetching details for team member slug:", slug);
+      const query = parseMemberDetailsQuery(req.query);
+      if (!query) return res.status(400).json({ message: "Invalid slug, month, or year" });
+      const { slug, month: requestedMonth, year: requestedYear } = query;
 
       const member = await TeamMember.findOne({ slug })
         .populate({
@@ -1224,14 +1263,6 @@ const clickupController = {
 
       if (req.user?.role !== "admin" && String(member.user?._id || "") !== String(req.user?.id || "")) {
         return res.status(403).json({ message: "You may only view your own ClickUp profile data" });
-      }
-
-      const currentYear = new Date().getFullYear();
-      const requestedMonth = month === undefined ? new Date().getMonth() : Number(month);
-      const requestedYear = year === undefined ? currentYear : Number(year);
-      if (!Number.isInteger(requestedMonth) || requestedMonth < 0 || requestedMonth > 11 ||
-          !Number.isInteger(requestedYear) || requestedYear < currentYear - 1 || requestedYear > currentYear) {
-        return res.status(400).json({ message: "Invalid month or year" });
       }
 
       if (member.user) {
@@ -1272,22 +1303,17 @@ const clickupController = {
           if (customToken && customToken !== CLICKUP_TOKEN) {
             try {
               console.log(`🔄 Attempting to fetch member time entries with custom token...`);
-              clickupRes = await axios.get(entriesUrl, {
-                headers: { Authorization: customToken },
-                timeout: 8000
-              });
-              console.log("✅ Custom token member time entries fetch successful!");
+              clickupRes = await getCachedClickUp(entriesUrl, customToken);
             } catch (err) {
-              console.error("⚠️ Custom token member time entries fetch failed, falling back to global token...", err.message);
+              console.error("Custom-token ClickUp request failed; trying configured fallback", {
+                status: err.response?.status,
+                code: err.code,
+              });
             }
           }
 
           if (!clickupRes) {
-            console.log(`🔄 Fetching member time entries using global token...`);
-            clickupRes = await axios.get(entriesUrl, {
-              headers: { Authorization: CLICKUP_TOKEN },
-              timeout: 8000
-            });
+            clickupRes = await getCachedClickUp(entriesUrl, CLICKUP_TOKEN);
           }
 
           const rawTimeEntries = clickupRes.data?.data || [];
@@ -1317,21 +1343,16 @@ const clickupController = {
 
           let allTasks = [];
           try {
-            console.log(`🔄 Fetching one page of team tasks assigned to user [${clickupId}]...`);
             const pages = [0];
             const taskRequests = pages.map(page =>
-              axios.get(`${tasksUrl}&page=${page}`, {
-                headers: { Authorization: tokenToUse },
-                timeout: 8000
-              })
+              getCachedClickUp(`${tasksUrl}&page=${page}`, tokenToUse)
             );
             const responses = await Promise.all(taskRequests);
             responses.forEach(res => {
               allTasks = allTasks.concat(res.data?.tasks || []);
             });
-            console.log(`✅ Successfully fetched ${allTasks.length} team tasks across pages.`);
           } catch (err) {
-            console.error("⚠️ Failed to fetch team tasks:", err.message);
+            console.error("ClickUp task request failed", { status: err.response?.status, code: err.code });
           }
 
           // Deduplicate tasks by id
@@ -1719,23 +1740,41 @@ const clickupController = {
             csat: calculatedCsat
           };
         } catch (clickupErr) {
-          console.error(`ClickUp API Error for member ${slug}:`, clickupErr.message);
+          console.error("ClickUp member metrics request failed", {
+            status: clickupErr.response?.status,
+            code: clickupErr.code,
+          });
           clickupPayload = { error: "ClickUp service temporarily unavailable" };
         }
       }
 
-      return res.json({ member, clickup: clickupPayload });
+      const safeMember = member.toObject();
+      if (safeMember.user) {
+        delete safeMember.user.password;
+        delete safeMember.user.resetPasswordToken;
+        delete safeMember.user.resetPasswordExpires;
+        delete safeMember.user.clickupToken;
+        delete safeMember.user.clickupId;
+        delete safeMember.user.clickupListId;
+        delete safeMember.user.clickupChatViewId;
+      }
+      return res.json({ member: safeMember, clickup: clickupPayload });
     } catch (err) {
-      console.error(err);
-      return res.status(500).json({ message: "Internal server error", error: err.message });
+      console.error("Failed to fetch authenticated member details", {
+        status: err.response?.status,
+        code: err.code,
+        name: err.name,
+      });
+      return res.status(500).json({ message: "Unable to fetch member details" });
     }
   }),
 
   // Public-facing member details: returns DB member info + ClickUp metrics (no authentication required)
   getPublicMemberDetails: expressAsyncHandler(async (req, res) => {
     try {
-      const { slug, month, year } = req.query;
-      if (!slug) return res.status(400).json({ message: 'Slug not provided' });
+      const query = parseMemberDetailsQuery(req.query);
+      if (!query) return res.status(400).json({ message: "Invalid slug, month, or year" });
+      const { slug } = query;
 
       const member = await TeamMember.findOne({ slug }).populate({
         path: 'user',
@@ -2234,15 +2273,22 @@ const clickupController = {
             csat: calculatedCsat
           };
         } catch (clickupErr) {
-          console.error(`ClickUp API Error for public member ${slug}:`, clickupErr.message);
+          console.error("ClickUp public member metrics request failed", {
+            status: clickupErr.response?.status,
+            code: clickupErr.code,
+          });
           clickupPayload = { error: "ClickUp service temporarily unavailable" };
         }
       }
 
       return res.json({ member, clickup: clickupPayload });
     } catch (err) {
-      console.error('getPublicMemberDetails error:', err);
-      return res.status(500).json({ message: 'Internal server error', error: err.message });
+      console.error("Failed to fetch public member details", {
+        status: err.response?.status,
+        code: err.code,
+        name: err.name,
+      });
+      return res.status(500).json({ message: "Unable to fetch member details" });
     }
   }),
 
@@ -2455,9 +2501,8 @@ const clickupController = {
             headers: {
               Authorization: config.clickupToken,
               'Content-Type': 'application/json'
-            },
+            }
           });
-          console.log("✅ Successfully posted comment using custom client token!");
           return res.json({ success: true });
         } catch (err) {
           console.error("❌ Custom token comment post failed:", err.response?.data || err.message);

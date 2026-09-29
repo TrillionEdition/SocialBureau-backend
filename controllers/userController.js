@@ -284,7 +284,7 @@ const userController = {
 
     const userCreated = await User.create({
       clickupId: sanitizedClickupId,
-      email,
+      email: email ? email.toLowerCase().trim() : email,
       rate: sanitizedRate,
       role: assignedRole,
       isEmployee: isAdminRequest ? isEmployee : false,
@@ -410,12 +410,14 @@ const userController = {
       }
     }
 
-    const userExist = await User.findOne({
-      $or: [
-        email ? { email: email.toLowerCase().trim() } : null,
-        clickupId ? { clickupId } : null,
-      ].filter(Boolean),
-    });
+    let userExist = null;
+    if (typeof email === "string" && email.trim()) {
+      userExist = await User.findOne({ email: email.trim() })
+        .collation({ locale: "en", strength: 2 });
+    }
+    if (!userExist && clickupId) {
+      userExist = await User.findOne({ clickupId });
+    }
 
     if (!userExist) {
       res.status(400);
@@ -442,7 +444,6 @@ const userController = {
     }
 
     // 🔐 ROLE & VERIFICATION CHECK - Fixed logic
-    console.log("Login User:", { id: userExist._id, role: userExist.role, isEmployee: userExist.isEmployee });
     const isEmployee = Boolean(userExist.isEmployee);
     const isVerified = userExist.verification === true; // Boolean comparison only
 

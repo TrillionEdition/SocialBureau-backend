@@ -75,4 +75,13 @@ const loginLimiter = rateLimit({
   message: { error: "Too many login attempts, please try again later." },
 });
 
-module.exports = { apiLimiter, loginLimiter, RedisRateLimitStore };
+const clickupMemberLimiter = rateLimit({
+  store: new RedisRateLimitStore("rl:clickup-member:"),
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many member data requests, please try again later." },
+});
+
+module.exports = { apiLimiter, loginLimiter, clickupMemberLimiter, RedisRateLimitStore };
