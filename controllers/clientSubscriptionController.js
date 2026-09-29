@@ -387,12 +387,36 @@ exports.verifyMySubscription = async (req, res) => {
     const razorpaySub = await razorpay.subscriptions.fetch(subscriptionId);
     subscription.status = razorpaySub.status;
     subscription.lastPaymentId = paymentId;
+    subscription.lastPaymentStatus = "captured";
+    subscription.lastPaymentAt = new Date();
     if (razorpaySub.current_start) subscription.currentPeriodStart = toDate(razorpaySub.current_start);
     if (razorpaySub.current_end) {
       subscription.currentPeriodEnd = toDate(razorpaySub.current_end);
       subscription.nextBillingDate = toDate(razorpaySub.current_end);
     }
     await subscription.save();
+
+    // Record this payment in history immediately (don't rely solely on the
+    // webhook, which may not be configured yet / may arrive later).
+    try {
+      const existingRecord = await SubscriptionPaymentHistory.findOne({ razorpayPaymentId: paymentId });
+      if (!existingRecord) {
+        const paymentDetails = await razorpay.payments.fetch(paymentId);
+        await SubscriptionPaymentHistory.create({
+          subscriptionId: subscription._id,
+          clientId: subscription.clientId,
+          razorpayPaymentId: paymentId,
+          amount: (paymentDetails.amount || 0) / 100,
+          currency: paymentDetails.currency || "INR",
+          status: "captured",
+          method: paymentDetails.method,
+          eventType: "checkout.verify",
+          occurredAt: new Date((paymentDetails.created_at || Date.now() / 1000) * 1000),
+        });
+      }
+    } catch (historyError) {
+      console.error("Error recording payment history from checkout verify:", historyError);
+    }
 
     res.json({ data: subscription });
   } catch (error) {
