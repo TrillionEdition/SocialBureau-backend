@@ -2,13 +2,13 @@ const axios = require('axios');
 const dotenv = require('dotenv');
 dotenv.config();
 
-const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN || "pk_88409188_D0Y7H1O1N6W5U4P2Z3Y2R1X0W9V8U7T6";
+const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN;
 const TEAM_ID = "9014733918";
 const KEERTHANA_ID = "88489814";
 
 async function run() {
   try {
-    const token = process.env.VITE_CLICKUP_API_TOKEN || CLICKUP_TOKEN;
+    const token = CLICKUP_TOKEN;
     console.log("Token configured:", token ? "Yes" : "No");
 
     // Fetch 10 pages of tasks concurrently

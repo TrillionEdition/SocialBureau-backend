@@ -189,38 +189,24 @@ router.put("/admin/member/:id", userAuthentication, require("../middlewares/isAd
             };
             const client = await Client.findOneAndUpdate(
               idQuery,
-              { $set: { name: cName, companyName: companyName || "", email: cEmail || "", phone: cPhone || "", website: website || "", logo: logo || "", notes: notes || "", status: status || "active" } },
+              {
+                $set: {
+                  name: cName,
+                  companyName: companyName ?? "",
+                  email: cEmail ?? "",
+                  phone: cPhone ?? "",
+                  website: website ?? "",
+                  logo: logo ?? "",
+                  notes: notes ?? "",
+                  status: status ?? "active"
+                }
+              },
               { new: true, upsert: true }
             );
             clientIds.push(client._id);
           }
         }
         userUpdate.clients = [...new Set(clientIds.map(id => id.toString()))];
-      }
-
-      if (achievements !== undefined) {
-        const Achievement = require("../models/achievementModel");
-        let achievementIds = [];
-        let parsedAchievements = achievements;
-        if (typeof achievements === 'string') {
-          try { parsedAchievements = JSON.parse(achievements); } catch (e) { parsedAchievements = []; }
-        }
-        if (parsedAchievements && Array.isArray(parsedAchievements)) {
-          await Achievement.deleteMany({ user: profile.user });
-          for (const ach of parsedAchievements) {
-            const { title, description, image, date } = ach || {};
-            if (!title) continue;
-            const createdAch = await Achievement.create({
-              user: profile.user,
-              title: title.trim(),
-              description: description || "",
-              image: image || "",
-              date: date || ""
-            });
-            achievementIds.push(createdAch._id);
-          }
-        }
-        userUpdate.achievements = achievementIds;
       }
 
       const savedUser = await User.findByIdAndUpdate(profile.user, { $set: userUpdate }, { new: true, runValidators: false });
@@ -561,7 +547,7 @@ router.get("/", async (req, res) => {
       .sort({ createdAt: 1 })
       .populate({
         path: "user",
-        select: "email name role isEmployee isInternship emp_id clickupId coverImage isClickUpVerified"
+        select: "email name isInternship isClickUpVerified"
       });
     const normalized = members.map(m => {
       const obj = (m && typeof m.toObject === 'function') ? m.toObject() : m;
@@ -910,7 +896,7 @@ router.get("/member/slug/:slug", async (req, res) => {
     const { slug } = req.params;
     const member = await TeamMember.findOne({ slug }).populate({
       path: "user",
-      select: "email name role isEmployee isInternship emp_id clickupId phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications blogs",
+      select: "email name role isEmployee isInternship emp_id phone doj rate tools clients achievements coverImage idCard hobbies podcasts events innovations workShowcase education certifications blogs",
       populate: [
         { path: 'tools', select: 'toolName icon url description level' },
         { path: 'clients', select: 'name companyName email website logo status notes' },

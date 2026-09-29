@@ -7,11 +7,12 @@ const { default: axios } = require("axios");
 const { getCache, setCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
 const FormData = require('form-data');
 const fs = require('fs');
+const crypto = require('crypto');
 
 const { AsyncLocalStorage } = require('async_hooks');
 const clickupStorage = new AsyncLocalStorage();
 
-const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
+const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN;
 const TEAM_ID = "9014733918";
 const LIST_ID = process.env.CLICKUP_NEW_LIST_ID || process.env.CLICKUP_CLIENT_LIST_ID || "901413612297";
 
@@ -31,10 +32,9 @@ axios.interceptors.request.use((config) => {
 
 // Helper to get user's ClickUp configuration
 const getUserConfig = async (userId, viewId = null) => {
-  let user = await User.findById(userId);
+  let user = await User.findById(userId).select("role clickupListId clickupChatViewId clickupId clickupToken");
 
   if (user && user.role === 'admin') {
-    // If the logged-in user is an admin, find the client who owns this viewId or listId
     let client = null;
     if (viewId && viewId !== 'current' && viewId !== 'undefined' && viewId !== 'null') {
       client = await User.findOne({
@@ -50,14 +50,28 @@ const getUserConfig = async (userId, viewId = null) => {
   }
 
   return {
-    listId: user?.clickupListId || LIST_ID,
+    listId: user?.clickupListId || null,
     chatViewId: user?.clickupChatViewId || null,
     clickupId: user?.clickupId || null,
     clickupToken: (user?.clickupToken && user.clickupToken.trim()) ? user.clickupToken.trim() : CLICKUP_TOKEN,
-    teamId: TEAM_ID // Assuming same team for now, can be expanded
+    teamId: TEAM_ID
   };
 };
 
+const isAllowedTask = (task, config) => {
+  const inConfiguredList = String(task?.list?.id || "") === String(config.listId || "");
+  const assignedToUser = !config.clickupId || (task?.assignees || []).some(assignee =>
+    String(assignee.id) === String(config.clickupId)
+  );
+  return inConfiguredList && assignedToUser;
+};
+
+const resolveChatViewId = (requestedViewId, config) => {
+  const viewId = ["", "undefined", "null", "current"].includes(String(requestedViewId || ""))
+    ? config.chatViewId
+    : String(requestedViewId);
+  return viewId && String(viewId) === String(config.chatViewId) ? viewId : null;
+};
 
 
 // Escape user input for safe usage in RegExp
@@ -107,10 +121,14 @@ const clickupController = {
   getTaskById: expressAsyncHandler(async (req, res) => {
     try {
       const { taskId } = req.params;
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(taskId || "")) {
+        return res.status(400).json({ success: false, message: "Invalid task ID" });
+      }
       const url = `https://api.clickup.com/api/v2/task/${taskId}`;
       console.log(`🔗 Fetching ClickUp Task [${taskId}]`);
 
       const config = await getUserConfig(req.user.id, taskId);
+      if (!config.listId) return res.status(403).json({ success: false, message: "No ClickUp list is configured for this account" });
       try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
       let response = null;
@@ -137,6 +155,9 @@ const clickupController = {
 
       // Map to our standard task format
       const task = response.data;
+      if (!isAllowedTask(task, config)) {
+        return res.status(404).json({ success: false, message: "Task not found" });
+      }
       const mappedTask = {
         id: task.id,
         title: task.name,
@@ -161,7 +182,7 @@ const clickupController = {
       });
     } catch (error) {
       console.error("❌ ClickUp API Error (getTaskById):", error.response?.data || error.message);
-      res.status(500).json({ success: false, error: error.response?.data || error.message });
+      res.status(502).json({ success: false, message: "ClickUp request failed" });
     }
   }),
 
@@ -170,42 +191,42 @@ const clickupController = {
       let targetUrl = req.query.url;
       if (!targetUrl) return res.status(400).send("No URL provided");
 
-      if (!CLICKUP_TOKEN) {
-        console.error("❌ CLICKUP_TOKEN is missing in backend environment!");
-        return res.status(500).send("Backend configuration error");
+      const validateProxyUrl = (value) => {
+        if (typeof value !== "string" || value.length > 4096) throw new Error("Unsupported image URL");
+        const parsed = new URL(value);
+        const host = parsed.hostname.toLowerCase();
+        const isClickUp = host === "clickup-attachments.com" || host.endsWith(".clickup-attachments.com");
+        const isClickUpStorage = host.endsWith(".amazonaws.com") || host.endsWith(".cloudfront.net");
+        if (parsed.protocol !== "https:" || (!isClickUp && !isClickUpStorage)) {
+          throw new Error("Unsupported image URL");
+        }
+        return { parsed };
+      };
+
+      try {
+        validateProxyUrl(targetUrl);
+      } catch (_) {
+        return res.status(400).send("Unsupported image URL");
       }
 
       console.log(`🖼️ Proxying image: ${targetUrl}`);
-
-      // Helper to determine if we should send the ClickUp token
-      const shouldSendToken = (url) => {
-        const isClickUpDomain = url.includes('clickup.com');
-        const isSigned = url.includes('X-Amz-Signature') || url.includes('AWSAccessKeyId') || url.includes('Expires=');
-        return isClickUpDomain && !isSigned;
-      };
 
       const fetchWithRedirects = async (url, depth = 0) => {
         if (depth > 5) throw new Error("Too many redirects");
 
         const headers = {};
-        if (shouldSendToken(url)) {
-          headers.Authorization = CLICKUP_TOKEN;
-        }
+        const { parsed } = validateProxyUrl(url);
 
         const response = await axios.get(url, {
           headers,
-          responseType: 'stream',
+          responseType: 'arraybuffer',
           maxRedirects: 0,
+          maxContentLength: 20 * 1024 * 1024,
           validateStatus: (status) => (status >= 200 && status < 400)
         });
 
         if (response.status >= 300 && response.status < 400 && response.headers.location) {
-          let nextUrl = response.headers.location;
-          // Handle relative redirects
-          if (nextUrl.startsWith('/')) {
-            const urlObj = new URL(url);
-            nextUrl = `${urlObj.protocol}//${urlObj.host}${nextUrl}`;
-          }
+          const nextUrl = new URL(response.headers.location, parsed).toString();
           console.log(`↪️ [Depth ${depth}] Redirecting to: ${nextUrl}`);
           return fetchWithRedirects(nextUrl, depth + 1);
         }
@@ -214,14 +235,16 @@ const clickupController = {
       };
 
       const finalResponse = await fetchWithRedirects(targetUrl);
+      const contentType = String(finalResponse.headers['content-type'] || '').toLowerCase();
+      if (!contentType.startsWith('image/')) {
+        return res.status(415).send("Unsupported image content");
+      }
 
       // Forward essential headers
-      if (finalResponse.headers['content-type']) {
-        res.setHeader('Content-Type', finalResponse.headers['content-type']);
-      }
+      res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'public, max-age=3600'); 
 
-      finalResponse.data.pipe(res);
+      res.send(finalResponse.data);
     } catch (error) {
       console.error("❌ Proxy Error:", error.message);
       res.status(500).send(`Error proxying image: ${error.message}`);
@@ -232,21 +255,16 @@ const clickupController = {
     try {
       let { viewId } = req.params;
       const config = await getUserConfig(req.user.id, viewId);
-      // Allow frontend to force a per-request token via header or body
-      const overrideToken = req.headers['x-clickup-token'] || req.body?.clickupToken;
-      if (overrideToken && String(overrideToken).trim()) {
-        config.clickupToken = String(overrideToken).trim();
-      }
       try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
       
       // If viewId is a placeholder or not provided, use user's config
       if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
-        viewId = config.chatViewId || "8cn3v2y-28474";
+        viewId = config.chatViewId;
       }
 
-      if (!viewId) {
+      if (!viewId || !resolveChatViewId(viewId, config)) {
         console.error("❌ Upload failed: No Chat View ID found");
-        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+        return res.status(403).json({ success: false, message: "Chat view is not available to this user" });
       }
 
       console.log(`📂 Upload request for View ID: ${viewId}`);
@@ -303,8 +321,7 @@ const clickupController = {
           if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
           return res.status(err.response?.status || 500).json({
             success: false,
-            message: "Failed to upload file using your personal ClickUp token. Please verify your token and list/view permissions in ClickUp.",
-            error: err.response?.data || err.message
+            message: "Failed to upload file"
           });
         }
       } else {
@@ -321,8 +338,7 @@ const clickupController = {
           if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
           return res.status(err.response?.status || 500).json({
             success: false,
-            message: "Failed to upload file to ClickUp using global token",
-            error: err.response?.data || err.message
+            message: "Failed to upload file"
           });
         }
       }
@@ -428,8 +444,7 @@ const clickupController = {
             console.error("❌ Custom token auto-post failed:", err.response?.data || err.message);
             return res.status(err.response?.status || 500).json({
               success: false,
-              message: "Failed to auto-post attachment comment using your personal ClickUp token. Please verify your token and permissions.",
-              error: err.response?.data || err.message
+              message: "Failed to post attachment comment"
             });
           }
         } else {
@@ -452,10 +467,7 @@ const clickupController = {
         if (hasCustomToken) throw commentErr;
       }
 
-      res.json({
-        success: true,
-        attachment: response.data
-      });
+      res.json({ success: true });
     } catch (error) {
       const errorData = error.response?.data;
       const status = error.response?.status;
@@ -471,15 +483,13 @@ const clickupController = {
       if (status === 404) {
         return res.status(404).json({ 
           success: false, 
-          message: "ClickUp API Error: This chat view does not support direct attachments. Try uploading to a task instead.",
-          details: errorData 
+          message: "This chat view does not support direct attachments. Try uploading to a task instead."
         });
       }
 
       res.status(status || 500).json({ 
         success: false, 
-        message: "Failed to upload to ClickUp",
-        error: errorData || error.message 
+        message: "Failed to upload to ClickUp"
       });
     }
   }),
@@ -598,7 +608,7 @@ const clickupController = {
   // Start OAuth: return a ClickUp authorization URL the frontend can redirect the user to
   startOAuth: expressAsyncHandler(async (req, res) => {
     try {
-      const clientId = process.env.VITE_CLICKUP_CLIENT_ID || process.env.CLICKUP_CLIENT_ID;
+      const clientId = process.env.CLICKUP_CLIENT_ID;
       const redirectBase = process.env.CLICKUP_OAUTH_REDIRECT || process.env.BASE_URL || `http://localhost:3000`;
       // The backend callback endpoint
       const callbackUrl = `${redirectBase.replace(/\/$/, '')}/clickup/oauth/callback`;
@@ -608,7 +618,15 @@ const clickupController = {
       }
 
       // Return the URL for the frontend to redirect the user to (keeps flexibility for frontend)
-      const authUrl = `https://app.clickup.com/api?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}`;
+      const state = crypto.randomBytes(32).toString("hex");
+      const isProd = process.env.NODE_ENV === "production";
+      res.cookie("clickupOAuthState", state, {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: isProd,
+        maxAge: 10 * 60 * 1000
+      });
+      const authUrl = `https://app.clickup.com/api?client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUrl)}&state=${state}`;
       return res.json({ success: true, url: authUrl });
     } catch (err) {
       console.error('❌ startOAuth error:', err.message || err);
@@ -622,8 +640,19 @@ const clickupController = {
       const code = req.query.code;
       if (!code) return res.status(400).json({ success: false, message: 'Missing code' });
 
-      const clientId = process.env.VITE_CLICKUP_CLIENT_ID || process.env.CLICKUP_CLIENT_ID;
-      const clientSecret = process.env.VITE_CLICKUP_CLIENT_SECRET || process.env.CLICKUP_CLIENT_SECRET;
+      const expectedState = req.cookies?.clickupOAuthState;
+      const receivedState = req.query.state;
+      res.clearCookie("clickupOAuthState", {
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production"
+      });
+      if (typeof receivedState !== "string" || !expectedState || receivedState !== expectedState) {
+        return res.status(400).json({ success: false, message: "Invalid OAuth state" });
+      }
+
+      const clientId = process.env.CLICKUP_CLIENT_ID;
+      const clientSecret = process.env.CLICKUP_CLIENT_SECRET;
 
       if (!clientId || !clientSecret) {
         return res.status(500).json({ success: false, message: 'ClickUp client credentials not configured' });
@@ -641,7 +670,7 @@ const clickupController = {
       const accessToken = tokenRes.data?.access_token || tokenRes.data?.token || tokenRes.data?.accessToken || null;
       if (!accessToken) {
         console.error('❌ No access token returned:', tokenRes.data);
-        return res.status(500).json({ success: false, message: 'Failed to obtain ClickUp access token', details: tokenRes.data });
+        return res.status(502).json({ success: false, message: 'Failed to obtain ClickUp access token' });
       }
 
       // Fetch ClickUp user profile to get their ClickUp user id
@@ -678,6 +707,7 @@ const clickupController = {
   getTasks: expressAsyncHandler(async (req, res) => {
     try {
       const config = await getUserConfig(req.user.id);
+      if (!config.listId) return res.status(403).json({ success: false, message: "No ClickUp list is configured for this account" });
       const userListId = config.listId;
 
       let listRes = null;
@@ -738,9 +768,19 @@ const clickupController = {
           color: a.color
         })),
         progress: task.points || 0,
-        timeSpent: task.time_spent ? (task.time_spent / 3600000).toFixed(2) + 'h' : '0h',
-        description: task.description || 'No description provided.'
+        timeSpent: task.time_spent ? (task.time_spent / 3600000).toFixed(2) + 'h' : '0h'
       }));
+      const activity = (response.data.tasks || [])
+        .filter(task => task.date_created && !Number.isNaN(Number(task.date_created)))
+        .map(task => ({
+          id: `create-${task.id}`,
+          user: task.creator?.username || "Team Member",
+          target: task.name || "Project Task",
+          type: "create",
+          time: new Date(Number(task.date_created)).toISOString()
+        }))
+        .sort((a, b) => new Date(b.time) - new Date(a.time))
+        .slice(0, 50);
 
       // Calculate Milestones & Velocity
       const totalTasks = tasks.length;
@@ -801,6 +841,7 @@ const clickupController = {
       res.json({
         success: true,
         tasks,
+        activity,
         stats: {
           totalTasks,
           completedTasks,
@@ -817,13 +858,91 @@ const clickupController = {
     }
   }),
 
+  getRecentActivity: expressAsyncHandler(async (req, res) => {
+    try {
+      const config = await getUserConfig(req.user.id);
+      if (!config.listId) {
+        return res.status(403).json({ success: false, message: "No ClickUp list is configured for this account" });
+      }
+
+      const url = `https://api.clickup.com/api/v2/team/${TEAM_ID}/activity`;
+      const headers = { Authorization: config.clickupToken || CLICKUP_TOKEN };
+      let allowedTaskIds = null;
+      if (config.clickupId) {
+        const taskUrl = `https://api.clickup.com/api/v2/list/${config.listId}/task?include_closed=true&assignees[]=${encodeURIComponent(config.clickupId)}&limit=100`;
+        let taskResponse;
+        try {
+          taskResponse = await axios.get(taskUrl, { headers, timeout: 8000 });
+        } catch (error) {
+          if (!CLICKUP_TOKEN || headers.Authorization === CLICKUP_TOKEN) throw error;
+          headers.Authorization = CLICKUP_TOKEN;
+          taskResponse = await axios.get(taskUrl, { headers, timeout: 8000 });
+        }
+        allowedTaskIds = new Set((taskResponse.data.tasks || []).map(task => String(task.id)));
+      }
+      let response;
+      try {
+        response = await axios.get(url, {
+          headers,
+          params: { "list_ids[]": config.listId, limit: 50 },
+          timeout: 8000
+        });
+      } catch (error) {
+        if (!CLICKUP_TOKEN || headers.Authorization === CLICKUP_TOKEN) throw error;
+        response = await axios.get(url, {
+          headers: { Authorization: CLICKUP_TOKEN },
+          params: { "list_ids[]": config.listId, limit: 50 },
+          timeout: 8000
+        });
+      }
+
+      const activity = (response.data.activities || [])
+        .filter(item => !allowedTaskIds || allowedTaskIds.has(String(item.task?.id || "")))
+        .slice(0, 50).flatMap(item => {
+        const after = item.details?.after;
+        const afterText = String(typeof after === "object" ? after?.status || after?.priority || "" : after || "").toLowerCase();
+        let type;
+        if (item.type === "taskCreated") type = "create";
+        else if (item.type === "statusUpdated") {
+          type = /complete|closed|done/.test(afterText) ? "complete" : "in-progress";
+        } else if (item.type === "priorityUpdated") type = "priority";
+        else if (item.type === "taskDeleted") type = "delete";
+        else if (item.type === "attachmentAdded") type = "upload";
+        else if (item.type === "commentAdded") type = "comment";
+        if (!type || !item.date) return [];
+
+        const timestamp = Number(item.date);
+        if (!Number.isFinite(timestamp)) return [];
+        const attachment = item.details?.attachment;
+        const attachmentUrl = attachment?.url;
+        return [{
+          id: String(item.id),
+          user: item.user?.username || "Team Member",
+          target: item.task?.name || "Project Task",
+          type,
+          image: attachment?.thumbnail_large || attachmentUrl,
+          url: attachmentUrl,
+          extension: attachment?.extension,
+          time: new Date(timestamp).toISOString()
+        }];
+      }).sort((a, b) => new Date(b.time) - new Date(a.time));
+
+      return res.json({ success: true, activity });
+    } catch (error) {
+      console.error("ClickUp activity fetch failed:", error.response?.status || error.message);
+      return res.status(502).json({ success: false, message: "ClickUp activity is unavailable" });
+    }
+  }),
+
   getTaskActivity: expressAsyncHandler(async (req, res) => {
     try {
       const { taskId } = req.params;
       if (!taskId) return res.status(400).json({ message: "Task ID is required" });
+      if (!/^[A-Za-z0-9_-]{1,100}$/.test(taskId)) return res.status(400).json({ message: "Invalid task ID" });
 
       console.log(`🔗 Fetching Activity for Task [${taskId}]`);
       const config = await getUserConfig(req.user.id, taskId);
+      if (!config.listId) return res.status(403).json({ success: false, message: "No ClickUp list is configured for this account" });
       try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
       let taskRes = null;
@@ -837,10 +956,13 @@ const clickupController = {
           taskRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
             headers: { Authorization: customToken },
           });
-          timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`, {
+          if (!isAllowedTask(taskRes.data, config)) {
+            return res.status(404).json({ success: false, message: "Task not found" });
+          }
+          timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}&limit=100`, {
             headers: { Authorization: customToken },
           });
-          commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+          commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment?limit=100`, {
             headers: { Authorization: customToken },
           });
           console.log("✅ Custom token task activity fetch successful!");
@@ -854,24 +976,37 @@ const clickupController = {
         taskRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}`, {
           headers: { Authorization: CLICKUP_TOKEN },
         });
-        timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}`, {
+        if (!isAllowedTask(taskRes.data, config)) {
+          return res.status(404).json({ success: false, message: "Task not found" });
+        }
+        timeEntriesRes = await axios.get(`https://api.clickup.com/api/v2/team/${TEAM_ID}/time_entries?task_id=${taskId}&limit=100`, {
           headers: { Authorization: CLICKUP_TOKEN },
         });
-        commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment`, {
+        commentsRes = await axios.get(`https://api.clickup.com/api/v2/task/${taskId}/comment?limit=100`, {
           headers: { Authorization: CLICKUP_TOKEN },
         });
       }
 
+      if (!isAllowedTask(taskRes.data, config)) {
+        return res.status(404).json({ success: false, message: "Task not found" });
+      }
+
       res.json({
         success: true,
-        attachments: taskRes.data.attachments || [],
+        attachments: (taskRes.data.attachments || []).map(file => ({
+          id: file.id,
+          title: file.title || file.name,
+          url: file.url,
+          thumbnail_large: file.thumbnail_large,
+          thumbnail_small: file.thumbnail_small
+        })),
         timeEntries: (timeEntriesRes.data.data || []).map(entry => ({
           id: entry.id,
           start: new Date(parseInt(entry.start)).toLocaleString(),
           end: entry.end ? new Date(parseInt(entry.end)).toLocaleString() : 'Ongoing',
           duration: (parseInt(entry.duration) / 3600000).toFixed(2) + 'h',
-          user: entry.user.username,
-          initials: entry.user.initials
+          user: entry.user?.username || "Team Member",
+          initials: entry.user?.initials || ""
         })),
         comments: (commentsRes.data.comments || []).map(comment => ({
           id: comment.id,
@@ -1087,6 +1222,18 @@ const clickupController = {
         return res.status(404).json({ message: "Team member not found" });
       }
 
+      if (req.user?.role !== "admin" && String(member.user?._id || "") !== String(req.user?.id || "")) {
+        return res.status(403).json({ message: "You may only view your own ClickUp profile data" });
+      }
+
+      const currentYear = new Date().getFullYear();
+      const requestedMonth = month === undefined ? new Date().getMonth() : Number(month);
+      const requestedYear = year === undefined ? currentYear : Number(year);
+      if (!Number.isInteger(requestedMonth) || requestedMonth < 0 || requestedMonth > 11 ||
+          !Number.isInteger(requestedYear) || requestedYear < currentYear - 1 || requestedYear > currentYear) {
+        return res.status(400).json({ message: "Invalid month or year" });
+      }
+
       if (member.user) {
         const u = member.user;
         if (!u.achievements || u.achievements.length === 0) {
@@ -1107,8 +1254,8 @@ const clickupController = {
         const now = Date.now();
         const hundredEightyDaysAgo = now - 180 * 24 * 60 * 60 * 1000;
 
-        const selectedMonth = month !== undefined ? parseInt(month) : new Date().getMonth();
-        const selectedYear = year !== undefined ? parseInt(year) : new Date().getFullYear();
+        const selectedMonth = requestedMonth;
+        const selectedYear = requestedYear;
 
         const selectedDateStart = new Date(Date.UTC(selectedYear, selectedMonth, 1, 0, 0, 0, 0)).getTime() - 5.5 * 60 * 60 * 1000;
         const selectedDateEnd = new Date(Date.UTC(selectedYear, selectedMonth + 1, 0, 23, 59, 59, 999)).getTime() - 5.5 * 60 * 60 * 1000;
@@ -1170,8 +1317,8 @@ const clickupController = {
 
           let allTasks = [];
           try {
-            console.log(`🔄 Fetching team tasks assigned to user [${clickupId}] (8 pages concurrently)...`);
-            const pages = [0, 1, 2, 3, 4, 5, 6, 7];
+            console.log(`🔄 Fetching one page of team tasks assigned to user [${clickupId}]...`);
+            const pages = [0];
             const taskRequests = pages.map(page =>
               axios.get(`${tasksUrl}&page=${page}`, {
                 headers: { Authorization: tokenToUse },
@@ -1195,22 +1342,17 @@ const clickupController = {
           const uniqueTasks = Array.from(taskMap.values());
 
           const tasksWithDetails = uniqueTasks.map(task => ({
-            id: task.id,
             title: task.name,
             status: task.status?.status,
-            statusColor: task.status?.color,
             statusType: task.status?.type || "",
             listName: task.list?.name || "",
             folderName: task.folder?.name || "",
-            description: task.description || "",
-            due: task.due_date ? new Date(parseInt(task.due_date)).toLocaleDateString() : null,
             dueDateMs: task.due_date ? parseInt(task.due_date) : null,
             closedDateMs: task.date_closed ? parseInt(task.date_closed) : null,
             createdDateMs: task.date_created ? parseInt(task.date_created) : null,
             updatedDateMs: task.date_updated ? parseInt(task.date_updated) : null,
             timeEstimateMs: task.time_estimate || 0,
-            timeSpentMs: task.time_spent || 0,
-            url: task.url
+            timeSpentMs: task.time_spent || 0
           }));
 
           // Works Done represents the actual completed tasks in the selected month/year
@@ -1562,15 +1704,9 @@ const clickupController = {
           }
 
           clickupPayload = {
-            assignee: clickupId,
             worksDone,
             totalTasks,
-            totalMilliseconds,
-            totalSeconds,
-            totalMinutes,
             totalHours,
-            uniqueTaskIds,
-            tasksCount: uniqueTaskIds.length,
             tasks: tasksWithDetails,
             activityData,
             workingHoursData,
@@ -1603,15 +1739,27 @@ const clickupController = {
 
       const member = await TeamMember.findOne({ slug }).populate({
         path: 'user',
+        select: 'email name location doj emp_id isClickUpVerified',
         populate: [
           { path: 'tools', select: 'toolName url icon description level -_id' },
           { path: 'clients', select: 'name website logo -_id' },
-          { path: 'reviews', select: 'name company review rating createdAt -_id', match: { approved: true } },
           { path: 'achievements', select: 'title description image date createdAt' }
         ]
       });
 
       if (!member) return res.status(404).json({ message: 'Team member not found' });
+
+      const safeMember = member.toObject();
+      if (safeMember.user) {
+        delete safeMember.user.password;
+        delete safeMember.user.resetPasswordToken;
+        delete safeMember.user.resetPasswordExpires;
+        delete safeMember.user.clickupToken;
+        delete safeMember.user.clickupId;
+        delete safeMember.user.clickupListId;
+        delete safeMember.user.clickupChatViewId;
+      }
+      return res.json({ member: safeMember, clickup: null });
 
       // Ensure achievements exist on populated user object
       if (member.user) {
@@ -2103,8 +2251,20 @@ const clickupController = {
     try {
       const { clientName, clientCompany, status, dueDate, priority } = req.body;
 
-      if (!clientName) {
+      if (typeof clientName !== "string" || !clientName.trim() || clientName.length > 100) {
         return res.status(400).json({ success: false, message: "Client name is required" });
+      }
+      if (clientCompany !== undefined && (typeof clientCompany !== "string" || clientCompany.length > 150)) {
+        return res.status(400).json({ success: false, message: "Invalid client company" });
+      }
+      if (status !== undefined && (typeof status !== "string" || status.length > 50)) {
+        return res.status(400).json({ success: false, message: "Invalid task status" });
+      }
+      if (priority !== undefined && ![1, 2, 3, 4].includes(Number(priority))) {
+        return res.status(400).json({ success: false, message: "Invalid task priority" });
+      }
+      if (dueDate !== undefined && Number.isNaN(new Date(dueDate).getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid due date" });
       }
 
       console.log("\n📋 ============ CLICKUP TASK CREATION ============");
@@ -2140,6 +2300,7 @@ const clickupController = {
 
       const config = await getUserConfig(req.user.id);
       const userListId = config.listId;
+      if (!userListId) return res.status(403).json({ success: false, message: "No ClickUp list is configured for this account" });
 
       const url = `https://api.clickup.com/api/v2/list/${userListId}/task`;
       console.log("📋 POST URL:", url);
@@ -2162,36 +2323,19 @@ const clickupController = {
 
       return res.json({
         success: true,
-        message: "ClickUp task created successfully",
-        taskId: response.data.id,
-        taskUrl: response.data.url,
-        taskName: response.data.name
+        message: "ClickUp task created successfully"
       });
 
     } catch (error) {
       console.error("\n❌ ============ ERROR ============");
       console.error("❌ Status:", error.response?.status);
       console.error("❌ Status Text:", error.response?.statusText);
-      console.error("❌ Error Data:", JSON.stringify(error.response?.data, null, 2));
       console.error("❌ Message:", error.message);
-
-      // Log the request that was sent
-      if (error.config) {
-        console.error("❌ Request Data:", error.config.data);
-        console.error("❌ Request URL:", error.config.url);
-      }
       console.error("📋 ============ END ERROR ============\n");
-
-      const errorMessage = error.response?.data?.err || error.response?.data?.message || error.message;
 
       return res.status(error.response?.status || 500).json({
         success: false,
-        message: "Failed to create ClickUp task",
-        error: errorMessage,
-        details: {
-          status: error.response?.status,
-          data: error.response?.data
-        }
+        message: "Failed to create ClickUp task"
       });
     }
   }),
@@ -2202,19 +2346,17 @@ const clickupController = {
       const config = await getUserConfig(req.user.id, viewId);
       try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
-      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
-        viewId = config.chatViewId || "8cn3v2y-28474";
-      }
+      viewId = resolveChatViewId(viewId, config);
 
       if (!viewId) {
-        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+        return res.status(403).json({ success: false, message: "Chat view is not available to this user" });
       }
 
       // Detect if Task ID or View ID
       const isView = viewId.includes('-');
       const url = isView 
-        ? `https://api.clickup.com/api/v2/view/${viewId}/comment`
-        : `https://api.clickup.com/api/v2/task/${viewId}/comment`;
+        ? `https://api.clickup.com/api/v2/view/${viewId}/comment?limit=100`
+        : `https://api.clickup.com/api/v2/task/${viewId}/comment?limit=100`;
 
       console.log(`🔗 Fetching Chat Comments from ${isView ? 'View' : 'Task'} [${viewId}]`);
 
@@ -2227,7 +2369,7 @@ const clickupController = {
           response = await axios.get(url, {
             headers: { Authorization: customToken },
           });
-          console.log("✅ Custom token chat comments fetch successful!",customToken);
+          console.log("✅ Custom token chat comments fetch successful!");
         } catch (err) {
           console.error("⚠️ Custom token comments fetch failed, falling back to global token...", err.message);
         }
@@ -2242,11 +2384,36 @@ const clickupController = {
 
       res.json({
         success: true,
-        comments: response.data.comments || []
+        comments: (response.data.comments || []).slice(0, 100).map(comment => {
+          const mapAsset = asset => asset && ({
+            id: asset.id,
+            name: asset.name,
+            title: asset.title,
+            url: asset.url,
+            extension: asset.extension,
+            thumbnail_large: asset.thumbnail_large,
+            thumbnail_medium: asset.thumbnail_medium,
+            thumbnail_small: asset.thumbnail_small
+          });
+          return {
+            id: comment.id,
+            date: comment.date,
+            comment_text: comment.comment_text,
+            commentContent: comment.commentContent,
+            comment: Array.isArray(comment.comment) ? comment.comment.map(part => ({
+              type: part.type,
+              text: part.text,
+              attachment: mapAsset(part.attachment),
+              image: mapAsset(part.image)
+            })) : [],
+            attachments: Array.isArray(comment.attachments) ? comment.attachments.map(mapAsset) : [],
+            user: { id: comment.user?.id, username: comment.user?.username || "Unknown" }
+          };
+        })
       });
     } catch (error) {
       console.error("❌ ClickUp API Error (getChatComments):", error.response?.data || error.message);
-      res.json({ success: false, comments: [], error: error.response?.data || error.message });
+      res.status(502).json({ success: false, comments: [], message: "ClickUp request failed" });
     }
   }),
 
@@ -2255,20 +2422,16 @@ const clickupController = {
       let { viewId } = req.params;
       const { comment_text } = req.body;
       const config = await getUserConfig(req.user.id, viewId);      
-      
-      // Allow frontend to force a per-request token via header or body
-      const overrideToken = req.headers['x-clickup-token'] || req.body?.clickupToken;
-      if (overrideToken && String(overrideToken).trim()) {
-        config.clickupToken = String(overrideToken).trim();
-      }
       try { clickupStorage.enterWith({ clickupToken: config.clickupToken }); } catch (e) {}
 
-      if (!viewId || viewId === 'undefined' || viewId === 'null' || viewId === 'current') {
-        viewId = config.chatViewId || "8cn3v2y-28474";
-      }
+      viewId = resolveChatViewId(viewId, config);
 
       if (!viewId) {
-        return res.status(400).json({ success: false, message: "No Chat View ID configured for this user" });
+        return res.status(403).json({ success: false, message: "Chat view is not available to this user" });
+      }
+
+      if (typeof comment_text !== "string" || !comment_text.trim() || comment_text.length > 5000) {
+        return res.status(400).json({ success: false, message: "Invalid comment" });
       }
 
       // Detect if Task ID or View ID
@@ -2295,16 +2458,12 @@ const clickupController = {
             },
           });
           console.log("✅ Successfully posted comment using custom client token!");
-          return res.json({
-            success: true,
-            comment: response.data
-          });
+          return res.json({ success: true });
         } catch (err) {
           console.error("❌ Custom token comment post failed:", err.response?.data || err.message);
-          return res.status(err.response?.status || 500).json({
+          return res.status(err.response?.status || 502).json({
             success: false,
-            message: "Failed to post comment using your personal ClickUp token. Please verify your token and list/view permissions in ClickUp.",
-            error: err.response?.data || err.message
+            message: "Failed to post comment"
           });
         }
       }
@@ -2322,16 +2481,12 @@ const clickupController = {
       });
       console.log("✅ Posted comment using global token!");
 
-      res.json({
-        success: true,
-        comment: response.data
-      });
+      res.json({ success: true });
     } catch (err) {
       console.error("❌ postChatComment error:", err.response?.data || err.message);
-      res.status(500).json({
+      res.status(502).json({
         success: false,
-        message: "Failed to post comment to ClickUp",
-        error: err.response?.data || err.message
+        message: "Failed to post comment to ClickUp"
       });
     }
   }),

@@ -2,7 +2,7 @@ const axios = require('axios');
 const dotenv = require('dotenv');
 dotenv.config();
 
-const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
+const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN;
 const TEAM_ID = "9014733918";
 const ELIZEBATH_CLICKUP_ID = "88383388";
 

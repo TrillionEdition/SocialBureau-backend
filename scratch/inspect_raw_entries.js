@@ -5,7 +5,7 @@ const axios = require('axios');
 async function check() {
   try {
     const TEAM_ID = "9014733918";
-    const CLICKUP_TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
+    const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN;
     const reshmaId = '94203257';
 
     const startOfMay = new Date(2026, 4, 1).getTime();

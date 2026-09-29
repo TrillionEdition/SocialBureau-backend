@@ -2,7 +2,7 @@ const express = require("express");
 const clickupController = require("../controllers/clickupController");
 const clickupRoutes = express.Router();
 const multer = require('multer');
-const upload = multer({ dest: 'uploads/' }); // Temporary storage before proxying to ClickUp
+const upload = multer({ dest: 'uploads/', limits: { fileSize: 20 * 1024 * 1024 } });
 
 
 const userAuthentication = require("../middlewares/userAuthentication");
@@ -23,30 +23,20 @@ const clickupContext = async (req, res, next) => {
 
 const authWithContext = [userAuthentication, clickupContext];
 
-// Health check endpoint (no auth required - for debugging)
-clickupRoutes.get('/health', (req, res) => {
-  res.json({ status: 'ok', message: 'ClickUp API is running' });
-});
-
 clickupRoutes.get('/tasks', authWithContext, clickupController.getTasks);
 clickupRoutes.get('/tasks/:taskId', authWithContext, clickupController.getTaskById);
-clickupRoutes.get('/time', authWithContext, clickupController.getTime);
-clickupRoutes.get('/user-task', authWithContext, clickupController.getTasksById);
-clickupRoutes.get('/user-details', authWithContext, clickupController.getUserDetails);
 clickupRoutes.get('/member-details', authWithContext, clickupController.getMemberDetails);
-// Public endpoint for member profile basic info (no ClickUp data) - does not require auth
 clickupRoutes.get('/public-member-details', clickupController.getPublicMemberDetails);
-clickupRoutes.get('/test', authWithContext, clickupController.testClickUp);
 // OAuth connect flow for ClickUp (start + callback)
 clickupRoutes.get('/oauth/start', userAuthentication, clickupController.startOAuth);
 clickupRoutes.get('/oauth/callback', userAuthentication, clickupController.handleOAuthCallback);
 clickupRoutes.get('/tasks/:taskId/activity', authWithContext, clickupController.getTaskActivity);
+clickupRoutes.get('/recent-activity', authWithContext, clickupController.getRecentActivity);
 clickupRoutes.post('/create-task', authWithContext, clickupController.createTask);
 clickupRoutes.get('/chat-messages/:viewId', authWithContext, clickupController.getChatComments);
 clickupRoutes.post('/chat-messages/:viewId', authWithContext, clickupController.postChatComment);
 clickupRoutes.post('/chat-messages/:viewId/attachment', authWithContext, upload.single('attachment'), clickupController.uploadAttachment);
-clickupRoutes.get('/image-proxy', clickupController.proxyClickUpImage);
-clickupRoutes.get('/general-activity', authWithContext, clickupController.getGeneralActivity);
+clickupRoutes.get('/image-proxy', authWithContext, clickupController.proxyClickUpImage);
 
 
 module.exports = clickupRoutes;

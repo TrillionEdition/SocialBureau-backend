@@ -15,6 +15,7 @@ userRouter.post("/login", loginLimiter, userController.login)
 userRouter.post("/google-login", loginLimiter, userController.googleLogin)
 userRouter.get('/logout', userController.logout)
 userRouter.get('/team', userController.getUsers)
+userRouter.get('/admin/team', userAuthentication, isAdmin, userController.getAdminUsers)
 userRouter.put('/tools', userController.updateTool)
 userRouter.put('/clients', userController.updateClient)
 userRouter.get('/leaderboard', userController.getLeaderboard);
@@ -32,8 +33,8 @@ userRouter.post("/reset-password", userController.resetPassword);
 userRouter.post("/logout", userAuthentication, userController.logout)
 
 // Specific user routes (must come after static routes like /team, /leaderboard to avoid conflicts if IDs are not validated)
-userRouter.get('/:id', userController.getUserById);
-userRouter.put('/:id', upload.fields([
+userRouter.get('/:id', userAuthentication, userController.getUserById);
+userRouter.put('/:id', userAuthentication, upload.fields([
     { name: 'coverImage', maxCount: 1 },
     { name: 'idCard', maxCount: 1 },
     { name: 'avatar', maxCount: 1 }, // Added avatar support

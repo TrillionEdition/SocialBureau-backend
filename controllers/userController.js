@@ -23,60 +23,6 @@ function getUrlFromFile(f) {
   return f?.path || f?.secure_url || f?.url || f?.location || f?.publicUrl || null;
 }
 
-const syncClickupName = async (user) => {
-  try {
-    let clickupUsername = null;
-
-    // 1. Try custom token if present
-    if (user.clickupToken) {
-      try {
-        console.log(`🔄 Syncing ClickUp profile for ${user.email} using custom token...`);
-        const response = await axios.get('https://api.clickup.com/api/v2/user', {
-          headers: { Authorization: user.clickupToken },
-          timeout: 5000
-        });
-        if (response.data?.user?.username) {
-          clickupUsername = response.data.user.username;
-          console.log(`✅ Synced ClickUp Name using custom token: ${clickupUsername}`);
-        }
-      } catch (err) {
-        console.log(`⚠️ Custom token auth failed, falling back to global token search: ${err.message}`);
-      }
-    }
-
-    // 2. Try global token with clickupId if username not resolved yet
-    if (!clickupUsername && user.clickupId) {
-      console.log(`🔄 Syncing ClickUp profile for ${user.email} using assignee ID [${user.clickupId}]...`);
-      const globalToken = process.env.VITE_CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN || user.clickupToken;
-      if (globalToken) {
-        const response = await axios.get('https://api.clickup.com/api/v2/team', {
-          headers: { Authorization: globalToken },
-          timeout: 5000
-        });
-        const teams = response.data?.teams || [];
-        for (const team of teams) {
-          const memberObj = team.members.find(m => String(m.user?.id) === String(user.clickupId));
-          if (memberObj?.user?.username) {
-            clickupUsername = memberObj.user.username;
-            console.log(`✅ Synced ClickUp Name via Team Member List: ${clickupUsername}`);
-            break;
-          }
-        }
-      }
-    }
-
-    if (clickupUsername) {
-      if (user.role === 'client' && user.name) {
-        console.log(`ℹ️ Preserving manually configured client name: ${user.name} (ClickUp username: ${clickupUsername})`);
-      } else {
-        user.name = clickupUsername;
-      }
-    }
-  } catch (err) {
-    console.error("⚠️ Failed to sync ClickUp name:", err.response?.data || err.message);
-  }
-};
-
 const userController = {
 
   register: asyncHandler(async (req, res) => {
@@ -101,6 +47,8 @@ const userController = {
     } catch (_) {
       // Token invalid or missing — not an admin request, captcha required
     }
+
+    const assignedRole = !isAdminRequest && String(role || "").toLowerCase() === "admin" ? "partnership" : role;
 
     // Verify Cloudflare Turnstile Captcha (skip for admin users)
     if (process.env.CAPTCHA_SECRET_KEY && !isAdminRequest) {
@@ -128,7 +76,7 @@ const userController = {
       }
     }
 
-    const sanitizedClickupId = (clickupId && String(clickupId).trim()) ? String(clickupId).trim() : undefined;
+    const sanitizedClickupId = isAdminRequest && clickupId && String(clickupId).trim() ? String(clickupId).trim() : undefined;
     const sanitizedRate = (rate && String(rate).trim()) ? Number(rate) : undefined;
 
     if (email) {
@@ -338,8 +286,8 @@ const userController = {
       clickupId: sanitizedClickupId,
       email,
       rate: sanitizedRate,
-      role,
-      isEmployee,
+      role: assignedRole,
+      isEmployee: isAdminRequest ? isEmployee : false,
       name,
       emp_id,
       doj,
@@ -349,16 +297,10 @@ const userController = {
       exp,
       tools: toolIds,
       clients: uniqueClientIds,
-      clickupListId,
-      clickupChatViewId,
-      clickupToken,
+      clickupListId: isAdminRequest ? clickupListId : undefined,
+      clickupChatViewId: isAdminRequest ? clickupChatViewId : undefined,
+      clickupToken: isAdminRequest ? clickupToken : undefined,
     });
-
-    // Sync ClickUp Name on creation
-    await syncClickupName(userCreated);
-    await userCreated.save();
-
-
 
     if (!userCreated) {
       res.status(500);
@@ -504,10 +446,6 @@ const userController = {
     const isEmployee = Boolean(userExist.isEmployee);
     const isVerified = userExist.verification === true; // Boolean comparison only
 
-    // Sync ClickUp Name on login
-    await syncClickupName(userExist);
-    await userExist.save();
-
     const payload = {
       id: userExist._id.toString(),
       name: userExist.name,
@@ -548,10 +486,6 @@ const userController = {
         email: userExist.email,
         role: userExist.role,
         verification: userExist.verification,
-        clickupId: userExist.clickupId,
-        clickupListId: userExist.clickupListId,
-        clickupChatViewId: userExist.clickupChatViewId,
-        clickupToken: userExist.clickupToken,
         isEmployee,
         isVerified,
         hasPaidInfluencer: userExist.hasPaidInfluencer,
@@ -655,10 +589,6 @@ const userController = {
       console.log(`✅ Existing user logged in via Google: ${user.email}`);
     }
 
-    // Sync ClickUp Name on login
-    await syncClickupName(user);
-    await user.save();
-
     const isEmployee = Boolean(user.isEmployee);
     const isVerified = user.verification === true;
 
@@ -703,10 +633,6 @@ const userController = {
         email: user.email,
         role: user.role,
         verification: user.verification,
-        clickupId: user.clickupId,
-        clickupListId: user.clickupListId,
-        clickupChatViewId: user.clickupChatViewId,
-        clickupToken: user.clickupToken,
         isEmployee,
         isVerified,
         hasPaidInfluencer: user.hasPaidInfluencer,
@@ -726,12 +652,8 @@ const userController = {
     try {
       const users = await User.find(
         {},
-        "name rating exp rate coverImage idCard tools role email clickupId clickupListId clickupChatViewId clickupToken"
+        "name rating exp coverImage role"
       )
-        .populate({
-          path: "tools",
-          select: "toolName url icon description -_id",
-        })
         .lean()
         .exec();
 
@@ -742,6 +664,14 @@ const userController = {
         .status(500)
         .json({ message: "Internal server error", error: err.message });
     }
+  }),
+
+  getAdminUsers: asyncHandler(async (req, res) => {
+    const users = await User.find(
+      {},
+      "name role email clickupId clickupListId clickupChatViewId"
+    ).lean();
+    res.json(users);
   }),
 
   updateTool: asyncHandler(async (req, res) => {
@@ -1130,10 +1060,22 @@ const userController = {
   }),
 
   getUserById: asyncHandler(async (req, res) => {
+    if (req.user?.role !== "admin" && String(req.params.id) !== String(req.user?.id)) {
+      return res.status(403).json({ message: "You may only view your own account" });
+    }
     const user = await User.findById(req.params.id)
       .populate("tools clients achievements reviews")
       .lean();
     if (user) {
+      delete user.password;
+      delete user.resetPasswordToken;
+      delete user.resetPasswordExpires;
+      delete user.clickupToken;
+      if (req.user?.role !== "admin") {
+        delete user.clickupId;
+        delete user.clickupListId;
+        delete user.clickupChatViewId;
+      }
       res.json(user);
     } else {
       res.status(404);
@@ -1142,12 +1084,20 @@ const userController = {
   }),
 
   updateUser: asyncHandler(async (req, res) => {
+    const clickupFields = ["clickupId", "clickupListId", "clickupChatViewId", "clickupToken"];
+    if (req.user?.role !== "admin" && clickupFields.some((field) => Object.prototype.hasOwnProperty.call(req.body, field))) {
+      return res.status(403).json({ message: "Only admins may change ClickUp configuration" });
+    }
+    if (req.user?.role !== "admin" && String(req.params.id) !== String(req.user?.id)) {
+      return res.status(403).json({ message: "You may only update your own account" });
+    }
+
     const user = await User.findById(req.params.id);
 
     if (user) {
       user.name = req.body.name || user.name;
       user.email = req.body.email || user.email;
-      user.role = req.body.role || user.role;
+      user.role = req.user?.role === "admin" ? (req.body.role || user.role) : user.role;
       if (req.body.phone !== undefined) {
         user.phone = (req.body.phone && String(req.body.phone).trim()) ? Number(req.body.phone) : undefined;
       }
@@ -1333,8 +1283,6 @@ const userController = {
       if (req.body.password) {
         user.password = await bcrypt.hash(req.body.password, 10);
       }
-
-      await syncClickupName(user);
 
       const updatedUser = await user.save();
 
