@@ -44,6 +44,7 @@ const clientSubscriptionRoutes = require("./clientSubscriptionRoutes");
 const resumeMarketplaceRoutes = require("./resumeMarketplaceRoutes");
 
 const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
+const dynamicReportRoutes = require("../modules/dynamicReports/dynamicReportRoutes");
 
 const router = express.Router();
 
@@ -90,6 +91,7 @@ router.use("/api/ai", aiProxy);
 router.use("/api/pdf", pdfRoutes);
 router.use("/api/image", imageRoutes);
 router.use("/api/audit-reports", auditReportRoutes);
+router.use("/api/dynamic-reports", dynamicReportRoutes);
 router.use("/api/billing", billingRoutes);
 router.use("/api/subscription", subscriptionRoutes);
 router.use("/api/client-subscriptions", clientSubscriptionRoutes);
