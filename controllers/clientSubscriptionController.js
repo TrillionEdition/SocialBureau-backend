@@ -290,12 +290,21 @@ exports.cancelSubscription = async (req, res) => {
 // ─── Admin: Payment history across all clients (with filters) ──────────────
 exports.getAllPaymentHistory = async (req, res) => {
   try {
-    const { subscriptionId, clientId, status, skip = 0, limit = 20 } = req.query;
+    const { subscriptionId, clientId, status, search, skip = 0, limit = 20 } = req.query;
 
     const filter = {};
     if (subscriptionId) filter.subscriptionId = subscriptionId;
     if (clientId) filter.clientId = clientId;
     if (status) filter.status = status;
+    if (search) {
+      const matchingClients = await User.find({
+        $or: [
+          { name: { $regex: search, $options: "i" } },
+          { email: { $regex: search, $options: "i" } },
+        ],
+      }).select("_id");
+      filter.clientId = { $in: matchingClients.map((client) => client._id) };
+    }
 
     const total = await SubscriptionPaymentHistory.countDocuments(filter);
     const history = await SubscriptionPaymentHistory.find(filter)
@@ -311,6 +320,129 @@ exports.getAllPaymentHistory = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch payment history" });
   }
 };
+
+// ─── Admin: Live one-time transactions from Razorpay Payment Links ─────────
+exports.getPaymentLinkTransactions = (req, res) =>
+  loadPaymentLinkTransactions(req, res, true);
+
+exports.getMyPaymentLinkTransactions = (req, res) =>
+  loadPaymentLinkTransactions(req, res, false);
+
+async function loadPaymentLinkTransactions(req, res, isAdmin) {
+  try {
+    const { search, skip = 0, limit = 20 } = req.query;
+    const clients = await User.find(
+      isAdmin ? { role: "client" } : { _id: req.user.id, role: "client" }
+    ).select("name email phone");
+    if (!isAdmin && clients.length === 0) {
+      return res.status(403).json({ error: "Client account required" });
+    }
+    const clientsById = new Map(clients.map((client) => [client._id.toString(), client]));
+    const clientsByEmail = new Map(
+      clients.map((client) => [client.email.trim().toLowerCase(), client])
+    );
+    const clientsByPhone = new Map(
+      clients
+        .filter((client) => client.phone)
+        .map((client) => [String(client.phone).replace(/\D/g, "").slice(-10), client])
+    );
+
+    const links = [];
+    const pageSize = 100;
+    let linkSkip = 0;
+    while (true) {
+      const response = await razorpay.paymentLink.all({ count: pageSize, skip: linkSkip });
+      const page = response.payment_links || response.items || [];
+      links.push(...page);
+      if (page.length < pageSize) break;
+      linkSkip += pageSize;
+    }
+
+    const resolvedLinks = [];
+    for (let index = 0; index < links.length; index += 10) {
+      const batch = await Promise.all(
+        links.slice(index, index + 10).map(async (link) => {
+        let payments = Array.isArray(link.payments)
+          ? link.payments
+          : link.payments?.items || (link.payments ? [link.payments] : []);
+
+        if (
+          payments.length === 0 &&
+          ["paid", "partially_paid"].includes(link.status) &&
+          Number(link.amount_paid) > 0
+        ) {
+          try {
+            const details = await razorpay.paymentLink.fetch(link.id);
+            payments = Array.isArray(details.payments)
+              ? details.payments
+              : details.payments?.items || (details.payments ? [details.payments] : []);
+          } catch (error) {
+            console.error(`Failed to fetch Razorpay Payment Link ${link.id}:`, error.message);
+          }
+        }
+
+        return { link, payments };
+        })
+      );
+      resolvedLinks.push(...batch);
+    }
+
+    const query = isAdmin ? search?.trim().toLowerCase() : null;
+    const transactions = [];
+    for (const { link, payments } of resolvedLinks) {
+      const notesClientId = link.notes?.clientId || link.notes?.client_id;
+      const customerDetails = link.customer_details || link.customer || {};
+      const customerEmail = String(
+        customerDetails.email || link.email || link.notes?.email || ""
+      ).trim().toLowerCase();
+      const customerPhone = String(
+        customerDetails.contact || customerDetails.phone || link.contact || ""
+      ).replace(/\D/g, "").slice(-10);
+      const client =
+        clientsById.get(String(notesClientId)) ||
+        clientsByEmail.get(customerEmail) ||
+        clientsByPhone.get(customerPhone);
+
+      if (!client || (query && !`${client.name} ${client.email}`.toLowerCase().includes(query))) continue;
+
+      for (const payment of payments) {
+        const razorpayPaymentId = payment.payment_id || payment.id;
+        if (!razorpayPaymentId) continue;
+        const createdAt = Number(payment.created_at);
+        transactions.push({
+          _id: razorpayPaymentId,
+          clientId: { _id: client._id, name: client.name, email: client.email },
+          razorpayPaymentId,
+          razorpayPaymentLinkId: link.id,
+          razorpayInvoiceId: link.reference_id,
+          amount: Number(payment.amount || 0) / 100,
+          currency: payment.currency || link.currency || "INR",
+          status: payment.status || (link.status === "paid" ? "captured" : link.status),
+          method: payment.method,
+          occurredAt: Number.isFinite(createdAt)
+            ? new Date(createdAt * 1000)
+            : payment.created_at || link.created_at,
+          failureReason: payment.error_description || payment.error_reason,
+          eventType: "payment_link",
+          description: link.description,
+        });
+      }
+    }
+
+    transactions.sort((a, b) => new Date(b.occurredAt || 0) - new Date(a.occurredAt || 0));
+    const start = Math.max(0, parseInt(skip, 10) || 0);
+    const pageLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    res.json({
+      data: transactions.slice(start, start + pageLimit),
+      total: transactions.length,
+      skip: start,
+      limit: pageLimit,
+    });
+  } catch (error) {
+    console.error("Error fetching Razorpay Payment Link transactions:", error);
+    res.status(500).json({ error: "Failed to fetch Razorpay Payment Link transactions" });
+  }
+}
 
 // ─── Client: Get own subscriptions (all of them) ────────────────────────────
 exports.getMySubscription = async (req, res) => {
