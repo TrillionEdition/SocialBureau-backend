@@ -1778,7 +1778,7 @@ const clickupController = {
 
       const member = await TeamMember.findOne({ slug }).populate({
         path: 'user',
-        select: 'email name location doj emp_id isClickUpVerified',
+        select: 'email name location doj emp_id isClickUpVerified education',
         populate: [
           { path: 'tools', select: 'toolName url icon description level -_id' },
           { path: 'clients', select: 'name website logo -_id' },
