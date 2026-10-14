@@ -1,22 +1,32 @@
+const envNumber = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return process.env[name] !== undefined && process.env[name] !== "" && Number.isFinite(value) && value >= 0 ? value : fallback;
+};
+
 const CAMPAIGN_PRICING = Object.freeze({
-  Basic: Object.freeze({ ratePerThousand: 1 }),
-  "Age-Restricted": Object.freeze({ ratePerThousand: 500 }),
-  gstRate: 18,
-  razorpayFeeRate: 3,
-  minViews: 10000,
-  maxViews: 100000,
+  Basic: Object.freeze({ ratePerHour: envNumber("CAMPAIGN_RATE_BASIC", 350), maxViews: envNumber("CAMPAIGN_MAX_VIEWS_BASIC", 20000) }),
+  "Age-Restricted": Object.freeze({ ratePerHour: envNumber("CAMPAIGN_RATE_AGE_RESTRICTED", 500), maxViews: envNumber("CAMPAIGN_MAX_VIEWS_AGE_RESTRICTED", 35000) }),
+  gstRate: envNumber("CAMPAIGN_GST_RATE", 18),
+  razorpayFeeRate: envNumber("CAMPAIGN_RAZORPAY_FEE_RATE", 3),
+  minViews: 1000,
+  maxViews: 10000000,
   bookingLeadTimeMs: 30 * 60 * 1000,
 });
 
 const roundPaise = (value) => Math.round(value);
 
-function calculateCampaignPrice(requestedViews, campaignType) {
+function calculateCampaignEndAt(startAt, durationMinutes) {
+  return new Date(new Date(startAt).getTime() + durationMinutes * 60 * 1000);
+}
+
+function calculateCampaignPrice(requestedViews, durationMinutes, campaignType) {
   const category = CAMPAIGN_PRICING[campaignType];
-  if (!category || !Number.isInteger(requestedViews) || requestedViews < CAMPAIGN_PRICING.minViews || requestedViews > CAMPAIGN_PRICING.maxViews || requestedViews % 1000 !== 0) {
-    throw new Error("Invalid campaign type or requested views");
+  if (!category || !category.ratePerHour || !Number.isInteger(requestedViews) || requestedViews < 1 || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
+    throw new Error("Invalid campaign type, views or duration");
   }
 
-  const basePaise = requestedViews / 1000 * category.ratePerThousand * 100;
+  // Rate is per 1,000 views per hour.
+  const basePaise = roundPaise(category.ratePerHour * 100 * (requestedViews / 1000) * durationMinutes / 60);
   const gstPaise = roundPaise(basePaise * CAMPAIGN_PRICING.gstRate / 100);
   const subtotalPaise = basePaise + gstPaise;
   const processingFeePaise = roundPaise(subtotalPaise * CAMPAIGN_PRICING.razorpayFeeRate / 100);
@@ -37,11 +47,11 @@ function calculateCampaignPrice(requestedViews, campaignType) {
 
 function getCampaignPricingConfig() {
   return {
-    rates: { Basic: CAMPAIGN_PRICING.Basic.ratePerThousand, "Age-Restricted": CAMPAIGN_PRICING["Age-Restricted"].ratePerThousand },
+    rates: { Basic: CAMPAIGN_PRICING.Basic.ratePerHour, "Age-Restricted": CAMPAIGN_PRICING["Age-Restricted"].ratePerHour },
     gstRate: CAMPAIGN_PRICING.gstRate,
     razorpayFeeRate: CAMPAIGN_PRICING.razorpayFeeRate,
     minViews: CAMPAIGN_PRICING.minViews,
-    maxViews: CAMPAIGN_PRICING.maxViews,
+    maxViews: { Basic: CAMPAIGN_PRICING.Basic.maxViews, "Age-Restricted": CAMPAIGN_PRICING["Age-Restricted"].maxViews },
   };
 }
 
@@ -62,11 +72,15 @@ function isYoutubeVideoUrl(value) {
 }
 
 function validateCampaignBooking(input, now = Date.now()) {
-  const required = ["channelName", "channelId", "channelUrl", "campaignStartAt", "durationMinutes", "requestedViews", "campaignType"];
+  const required = ["clientName", "clientEmail", "channelName", "channelId", "channelUrl", "campaignStartAt", "durationMinutes", "requestedViews", "campaignType"];
   for (const field of required) {
     if (input[field] === undefined || input[field] === null || String(input[field]).trim() === "") {
       throw new Error(`${field} is required`);
     }
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(input.clientEmail).trim()) || String(input.clientEmail).length > 254) {
+    throw new Error("Enter a valid client email");
   }
 
   if (!isYoutubeVideoUrl(input.channelUrl.trim())) {
@@ -87,8 +101,15 @@ function validateCampaignBooking(input, now = Date.now()) {
   }
 
   const requestedViews = Number(input.requestedViews);
-  const pricingBreakdown = calculateCampaignPrice(requestedViews, input.campaignType);
-  return { startAt, durationMinutes, requestedViews, pricingBreakdown };
+  if (!Number.isInteger(requestedViews) || requestedViews < CAMPAIGN_PRICING.minViews) {
+    throw new Error(`Requested views must be at least ${CAMPAIGN_PRICING.minViews}`);
+  }
+  const maxViews = CAMPAIGN_PRICING[input.campaignType]?.maxViews;
+  if (maxViews && requestedViews > maxViews) {
+    throw new Error(`Above ${maxViews.toLocaleString("en-IN")} views for ${input.campaignType} needs a custom rate. Please contact SocialBureau.`);
+  }
+  const pricingBreakdown = calculateCampaignPrice(requestedViews, durationMinutes, input.campaignType);
+  return { startAt, endAt: calculateCampaignEndAt(startAt, durationMinutes), durationMinutes, requestedViews, pricingBreakdown };
 }
 
-module.exports = { CAMPAIGN_PRICING, calculateCampaignPrice, getCampaignPricingConfig, validateCampaignBooking };
+module.exports = { CAMPAIGN_PRICING, calculateCampaignEndAt, calculateCampaignPrice, getCampaignPricingConfig, validateCampaignBooking };

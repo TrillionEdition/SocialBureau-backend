@@ -1,9 +1,9 @@
 const crypto = require("crypto");
 const Campaign = require("../models/Campaign");
-const { calculateCampaignPrice, getCampaignPricingConfig, validateCampaignBooking } = require("../services/campaignService");
+const { getCampaignPricingConfig, validateCampaignBooking } = require("../services/campaignService");
 const { verifyPaymentSignature, verifyWebhookSignature, hashAccessToken, makeRazorpay } = require("../utils/campaignPayment");
 
-const bookingFields = ["channelName", "channelId", "channelUrl", "campaignStartAt", "durationMinutes", "requestedViews", "campaignType", "videoTitle", "seoKeywords", "videoTags", "videoDescription", "t1", "t2", "t3", "clientNotes"];
+const bookingFields = ["clientName", "clientEmail", "channelName", "channelId", "channelUrl", "campaignStartAt", "durationMinutes", "requestedViews", "campaignType", "videoTitle", "seoKeywords", "videoTags", "videoDescription", "t1", "t2", "t3", "clientNotes"];
 const campaignStatuses = ["Pending Payment", "Paid", "Scheduled", "In Progress", "Completed", "Cancelled"];
 const safeCampaign = (campaign) => {
   const result = campaign.toObject ? campaign.toObject() : campaign;
@@ -43,9 +43,12 @@ exports.createCampaign = async (req, res) => {
     const campaign = await Campaign.create({
       ...Object.fromEntries(bookingFields.map((field) => [field, input[field] === undefined ? "" : input[field]])),
       channelName: input.channelName.trim(),
+      clientName: input.clientName.trim(),
+      clientEmail: input.clientEmail.trim(),
       channelId: input.channelId.trim(),
       channelUrl: input.channelUrl.trim(),
       campaignStartAt: validated.startAt,
+      campaignEndAt: validated.endAt,
       durationMinutes: validated.durationMinutes,
       requestedViews: validated.requestedViews,
       pricingBreakdown: validated.pricingBreakdown,
@@ -78,7 +81,7 @@ exports.createOrder = async (req, res) => {
       return res.json({ orderId: campaign.razorpayOrderId, amount: campaign.pricingBreakdown.totalPaise, currency: "INR", keyId: process.env.RAZORPAY_KEY_ID });
     }
 
-    const amount = calculateCampaignPrice(campaign.requestedViews, campaign.campaignType).totalPaise;
+    const amount = campaign.pricingBreakdown.totalPaise;
     const order = await makeRazorpay().orders.create({ amount, currency: "INR", receipt: campaign.bookingId });
     campaign.razorpayOrderId = order.id;
     campaign.paymentStatus = "pending";
@@ -175,7 +178,7 @@ exports.adminList = async (req, res) => {
   }
   if (search) {
     const escapedSearch = String(search).slice(0, 100).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    query.$or = ["bookingId", "channelName", "channelId", "channelUrl"].map((field) => ({ [field]: { $regex: escapedSearch, $options: "i" } }));
+    query.$or = ["bookingId", "clientName", "clientEmail", "channelName", "channelId", "channelUrl"].map((field) => ({ [field]: { $regex: escapedSearch, $options: "i" } }));
   }
   const pageNumber = Math.max(1, Number(page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(limit) || 25));
@@ -220,7 +223,7 @@ exports.adminUpdate = async (req, res) => {
 
 exports.exportCsv = async (req, res) => {
   const campaigns = await Campaign.find().sort({ createdAt: -1 });
-  const columns = ["bookingId", "channelName", "channelId", "channelUrl", "requestedViews", "campaignType", "campaignStartAt", "durationMinutes", "paymentStatus", "campaignStatus", "baseAmount", "campaignGst", "estimatedRazorpayFee", "estimatedRazorpayFeeGst", "total", "createdAt"];
+  const columns = ["bookingId", "clientName", "clientEmail", "channelName", "channelId", "channelUrl", "requestedViews", "campaignType", "campaignStartAt", "campaignEndAt", "durationMinutes", "paymentStatus", "campaignStatus", "baseAmount", "campaignGst", "estimatedRazorpayFee", "estimatedRazorpayFeeGst", "total", "createdAt"];
   const quote = (value) => {
     const cell = String(value ?? "");
     const safeCell = /^[=+@\-]/.test(cell) ? `'${cell}` : cell;
