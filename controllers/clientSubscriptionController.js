@@ -405,9 +405,11 @@ async function loadPaymentLinkTransactions(req, res, isAdmin) {
 
       if (!client || (query && !`${client.name} ${client.email}`.toLowerCase().includes(query))) continue;
 
+      let hasPayment = false;
       for (const payment of payments) {
         const razorpayPaymentId = payment.payment_id || payment.id;
         if (!razorpayPaymentId) continue;
+        hasPayment = true;
         const createdAt = Number(payment.created_at);
         transactions.push({
           _id: razorpayPaymentId,
@@ -423,6 +425,24 @@ async function loadPaymentLinkTransactions(req, res, isAdmin) {
             ? new Date(createdAt * 1000)
             : payment.created_at || link.created_at,
           failureReason: payment.error_description || payment.error_reason,
+          eventType: "payment_link",
+          description: link.description,
+        });
+      }
+
+      if (!hasPayment) {
+        const createdAt = Number(link.created_at);
+        transactions.push({
+          _id: `link-${link.id}`,
+          clientId: { _id: client._id, name: client.name, email: client.email },
+          razorpayPaymentId: null,
+          razorpayPaymentLinkId: link.id,
+          razorpayInvoiceId: link.reference_id,
+          amount: Number(link.amount || 0) / 100,
+          currency: link.currency || "INR",
+          status: link.status || "created",
+          occurredAt: Number.isFinite(createdAt) ? new Date(createdAt * 1000) : link.created_at,
+          failureReason: null,
           eventType: "payment_link",
           description: link.description,
         });
@@ -449,10 +469,120 @@ exports.getMySubscription = async (req, res) => {
   try {
     const subscriptions = await ClientSubscription.find({
       clientId: req.user.id,
-      isDeleted: false,
+      isDeleted: { $ne: true },
     }).sort({ createdAt: -1 });
 
-    res.json({ data: subscriptions });
+    const client = await User.findById(req.user.id).select("name email");
+    const localByRazorpayId = new Map(
+      subscriptions.map((subscription) => [subscription.razorpaySubscriptionId, subscription])
+    );
+    const mergedByRazorpayId = new Map();
+    const customerCache = new Map();
+    const planCache = new Map();
+
+    try {
+      const razorpaySubscriptions = [];
+      const pageSize = 100;
+      let skip = 0;
+      while (true) {
+        const response = await razorpay.subscriptions.all({ count: pageSize, skip });
+        const page = response.items || response.subscriptions || [];
+        razorpaySubscriptions.push(...page);
+        if (page.length < pageSize) break;
+        skip += pageSize;
+      }
+
+      const clientEmail = String(client?.email || "").trim().toLowerCase();
+      const clientId = String(req.user.id);
+      for (let index = 0; index < razorpaySubscriptions.length; index += 10) {
+        const batch = await Promise.all(
+          razorpaySubscriptions.slice(index, index + 10).map(async (subscription) => {
+            const local = localByRazorpayId.get(subscription.id);
+            const notes = subscription.notes || {};
+            const notesEmail = String(notes.clientEmail || notes.email || "").trim().toLowerCase();
+            const matchesNotes =
+              String(notes.clientId || notes.client_id || "") === clientId ||
+              (clientEmail && notesEmail === clientEmail);
+
+            if (local || matchesNotes) return { subscription, local };
+            if (!clientEmail || !subscription.customer_id) return null;
+
+            if (!customerCache.has(subscription.customer_id)) {
+              customerCache.set(
+                subscription.customer_id,
+                razorpay.customers.fetch(subscription.customer_id).catch(() => null)
+              );
+            }
+            const customer = await customerCache.get(subscription.customer_id);
+            return String(customer?.email || "").trim().toLowerCase() === clientEmail
+              ? { subscription, local: null }
+              : null;
+          })
+        );
+
+        await Promise.all(
+          batch.filter(Boolean).map(async ({ subscription, local }) => {
+            const id = subscription.id;
+            if (local) {
+              const localData = local.toObject();
+              mergedByRazorpayId.set(id, {
+                ...localData,
+                status: subscription.status || localData.status,
+                currentPeriodStart: toDate(subscription.current_start) || localData.currentPeriodStart,
+                currentPeriodEnd: toDate(subscription.current_end) || localData.currentPeriodEnd,
+                nextBillingDate:
+                  toDate(subscription.charge_at || subscription.current_end) ||
+                  localData.nextBillingDate,
+              });
+              return;
+            }
+
+            if (!planCache.has(subscription.plan_id)) {
+              planCache.set(
+                subscription.plan_id,
+                razorpay.plans.fetch(subscription.plan_id).catch(() => null)
+              );
+            }
+            const plan = await planCache.get(subscription.plan_id);
+            mergedByRazorpayId.set(id, {
+              _id: id,
+              isExternal: true,
+              clientId: req.user.id,
+              razorpaySubscriptionId: id,
+              razorpayPlanId: subscription.plan_id,
+              razorpayCustomerId: subscription.customer_id,
+              planName:
+                subscription.notes?.planName ||
+                plan?.item?.name ||
+                plan?.name ||
+                "Razorpay Subscription",
+              amount: Number(plan?.item?.amount || 0) / 100,
+              currency: plan?.item?.currency || "INR",
+              status: subscription.status || "created",
+              startDate: toDate(subscription.start_at || subscription.created_at),
+              currentPeriodStart: toDate(subscription.current_start),
+              currentPeriodEnd: toDate(subscription.current_end),
+              nextBillingDate: toDate(subscription.charge_at || subscription.current_end),
+              lastPaymentStatus: null,
+              createdAt: toDate(subscription.created_at),
+            });
+          })
+        );
+      }
+    } catch (syncError) {
+      console.error("Error syncing client subscriptions from Razorpay:", syncError);
+    }
+
+    const data = subscriptions.map(
+      (subscription) =>
+        mergedByRazorpayId.get(subscription.razorpaySubscriptionId) || subscription
+    );
+    for (const [id, subscription] of mergedByRazorpayId) {
+      if (!localByRazorpayId.has(id)) data.push(subscription);
+    }
+    data.sort((a, b) => new Date(b.createdAt || b.startDate || 0) - new Date(a.createdAt || a.startDate || 0));
+
+    res.json({ data });
   } catch (error) {
     console.error("Error fetching my subscriptions:", error);
     res.status(500).json({ error: "Failed to fetch subscriptions" });
