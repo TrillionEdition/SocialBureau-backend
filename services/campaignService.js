@@ -1,5 +1,5 @@
 const CAMPAIGN_PRICING = Object.freeze({
-  Basic: Object.freeze({ ratePerThousand: 350 }),
+  Basic: Object.freeze({ ratePerThousand: 1 }),
   "Age-Restricted": Object.freeze({ ratePerThousand: 500 }),
   gstRate: 18,
   razorpayFeeRate: 3,
