@@ -1,0 +1,38 @@
+const mongoose = require("mongoose");
+
+const campaignSchema = new mongoose.Schema({
+  bookingId: { type: String, required: true, unique: true, index: true },
+  idempotencyKey: { type: String, unique: true, sparse: true },
+  accessTokenHash: { type: String, required: true, select: false },
+  clientId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
+  channelName: { type: String, required: true, maxlength: 160 },
+  channelId: { type: String, required: true, maxlength: 100, index: true },
+  channelUrl: { type: String, required: true, maxlength: 500 },
+  campaignStartAt: { type: Date, required: true, index: true },
+  durationMinutes: { type: Number, required: true, min: 1, max: 1440 },
+  requestedViews: { type: Number, required: true, min: 10000, max: 100000 },
+  campaignType: { type: String, enum: ["Basic", "Age-Restricted"], required: true, index: true },
+  videoTitle: { type: String, default: "", maxlength: 500 },
+  seoKeywords: { type: String, default: "", maxlength: 5000 },
+  videoTags: { type: String, default: "", maxlength: 5000 },
+  videoDescription: { type: String, default: "", maxlength: 10000 },
+  t1: { type: String, default: "", maxlength: 2000 },
+  t2: { type: String, default: "", maxlength: 2000 },
+  t3: { type: String, default: "", maxlength: 2000 },
+  clientNotes: { type: String, default: "", maxlength: 5000 },
+  internalAdminNotes: { type: String, default: "", maxlength: 10000 },
+  pricingBreakdown: { type: mongoose.Schema.Types.Mixed, required: true },
+  currency: { type: String, default: "INR", enum: ["INR"] },
+  razorpayOrderId: { type: String, default: undefined, unique: true, sparse: true },
+  razorpayPaymentId: { type: String, default: undefined, unique: true, sparse: true },
+  paymentStatus: { type: String, enum: ["pending", "paid", "failed"], default: "pending", index: true },
+  paidAt: { type: Date, default: null },
+  campaignStatus: { type: String, enum: ["Pending Payment", "Paid", "Scheduled", "In Progress", "Completed", "Cancelled"], default: "Pending Payment", index: true },
+  statusHistory: [{ status: String, adminId: mongoose.Schema.Types.ObjectId, adminName: String, changedAt: { type: Date, default: Date.now } }],
+  processedWebhookEventIds: { type: [String], default: [] },
+}, { timestamps: true });
+
+campaignSchema.index({ campaignStatus: 1, paymentStatus: 1, campaignStartAt: 1 });
+campaignSchema.index({ channelName: "text", channelId: "text", channelUrl: "text", bookingId: "text" });
+
+module.exports = mongoose.model("Campaign", campaignSchema);

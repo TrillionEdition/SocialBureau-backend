@@ -42,6 +42,7 @@ const billingRoutes = require("./billingRoutes");
 const subscriptionRoutes = require("./subscriptionRoutes");
 const clientSubscriptionRoutes = require("./clientSubscriptionRoutes");
 const resumeMarketplaceRoutes = require("./resumeMarketplaceRoutes");
+const campaignRoutes = require("./campaignRoutes");
 
 const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
 const dynamicReportRoutes = require("../modules/dynamicReports/dynamicReportRoutes");
@@ -96,6 +97,7 @@ router.use("/api/billing", billingRoutes);
 router.use("/api/subscription", subscriptionRoutes);
 router.use("/api/client-subscriptions", clientSubscriptionRoutes);
 router.use("/api/resume-marketplace", resumeMarketplaceRoutes);
+router.use("/api", campaignRoutes);
 router.use("/", intakeRoutes);
 
 module.exports = router;

@@ -41,7 +41,7 @@ app.use((req, res, next) => {
     );
     res.setHeader(
       "Access-Control-Allow-Headers",
-      "Content-Type, Authorization, X-Requested-With"
+      "Content-Type, Authorization, X-Requested-With, Idempotency-Key"
     );
     res.setHeader(
       "Access-Control-Expose-Headers",
@@ -67,7 +67,7 @@ app.use(
     },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Idempotency-Key"],
     exposedHeaders: ["Content-Disposition"],
     optionsSuccessStatus: 200, // Some legacy browsers choke on 204
   })

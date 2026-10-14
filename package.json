@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Tests passing!\"",
+    "test": "node --test middlewares/adminAuthentication.test.js services/campaignService.test.js utils/campaignPayment.test.js",
     "start": "node index.js",
     "dev": "nodemon index.js",
     "generate-sitemaps": "node scripts/generateSitemaps.js"

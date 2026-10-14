@@ -1,0 +1,14 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const adminAuthentication = require("./adminAuthentication");
+
+test("allows an admin role and rejects an ordinary client role", () => {
+  let passed = false;
+  adminAuthentication({ user: { role: "admin" } }, { status() { throw new Error("unexpected rejection"); } }, () => { passed = true; });
+  assert.equal(passed, true);
+
+  let statusCode;
+  const response = { status(code) { statusCode = code; return this; }, json() { return this; } };
+  adminAuthentication({ user: { role: "client" } }, response, () => { throw new Error("client passed admin authorization"); });
+  assert.equal(statusCode, 403);
+});
