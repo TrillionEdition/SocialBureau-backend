@@ -39,8 +39,11 @@ function calculateCampaignPrice(requestedViews, durationMinutes, campaignType) {
     subtotal: subtotalPaise / 100,
     estimatedRazorpayFee: processingFeePaise / 100,
     estimatedRazorpayFeeGst: processingFeeGstPaise / 100,
-    total: totalPaise / 100,
-    totalPaise,
+    // TEST OVERRIDE (revert after testing): restore the two commented lines and delete the two TEST lines.
+    // total: totalPaise / 100,
+    // totalPaise,
+    total: 2, // TEST
+    totalPaise: 200, // TEST
     currency: "INR",
   };
 }

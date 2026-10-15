@@ -15,6 +15,15 @@ dns.setDefaultResultOrder("ipv4first");
  * Used by emailService.js for direct transporter access
  */
 const createTransporter = () => {
+  // MODE 0: Brevo SMTP
+  if (process.env.BREVO_SMTP_KEY) {
+    return nodemailer.createTransport({
+      host: process.env.BREVO_SMTP_HOST || "smtp-relay.brevo.com",
+      port: Number(process.env.BREVO_SMTP_PORT) || 587,
+      secure: false,
+      auth: { user: process.env.BREVO_SMTP_USER, pass: process.env.BREVO_SMTP_KEY },
+    });
+  }
   // 🛡️ MODE 1: SendGrid (Recommended for Render)
   if (process.env.SENDGRID_API_KEY) {
     console.log("🚀 [MAILER] Initializing SendGrid on Port 2525 (Render Optimized)");
@@ -47,7 +56,7 @@ const sendMail = async ({ to, subject, html }) => {
   console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
   const mailOptions = {
-    from: `"SocialBureau" <${process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER}>`,
+    from: `"SocialBureau" <${process.env.BREVO_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER}>`,
     to,
     subject,
     html,

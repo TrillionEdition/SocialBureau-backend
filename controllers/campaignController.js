@@ -1,5 +1,7 @@
 const crypto = require("crypto");
 const Campaign = require("../models/Campaign");
+const { createInvoiceForCampaign } = require("../services/invoiceService");
+const sendMail = require("../utils/sendMail");
 const { getCampaignPricingConfig, validateCampaignBooking } = require("../services/campaignService");
 const { verifyPaymentSignature, verifyWebhookSignature, hashAccessToken, makeRazorpay } = require("../utils/campaignPayment");
 
@@ -118,6 +120,27 @@ async function markPaid(campaign, paymentId) {
   campaign.paidAt = new Date();
   if (campaign.campaignStatus === "Pending Payment") campaign.campaignStatus = "Paid";
   await campaign.save();
+  // Runs only after server-verified payment (webhook or Razorpay API fetch); failures must not affect payment.
+  createInvoiceForCampaign(campaign).catch((error) => console.error("Invoice creation failed:", error.message));
+  notifyCampaignBooked(campaign).catch((error) => console.error("Booking notification failed:", error.message));
+}
+
+async function notifyCampaignBooked(campaign) {
+  const esc = (value) => String(value ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const ist = (date) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }).format(new Date(date));
+  const rows = [
+    ["Booking ID", campaign.bookingId], ["Client", `${campaign.clientName} (${campaign.clientEmail})`],
+    ["Channel", `${campaign.channelName} (${campaign.channelId})`], ["URL", campaign.channelUrl],
+    ["Type", campaign.campaignType], ["Views", Number(campaign.requestedViews).toLocaleString("en-IN")],
+    ["Start (IST)", ist(campaign.campaignStartAt)], ["End (IST)", campaign.campaignEndAt ? ist(campaign.campaignEndAt) : "-"],
+    ["Duration", `${campaign.durationMinutes} min`], ["Amount paid", `INR ${campaign.pricingBreakdown.total}`],
+    ["Razorpay payment ID", campaign.razorpayPaymentId],
+  ];
+  await sendMail({
+    to: process.env.CEO_NOTIFY_EMAIL || "ceo@socialbureau.in",
+    subject: `New campaign booked and paid - ${campaign.bookingId}`,
+    html: `<h3>New YouTube campaign booked</h3><table cellpadding="4">${rows.map(([k, v]) => `<tr><td><b>${esc(k)}</b></td><td>${esc(v)}</td></tr>`).join("")}</table>`,
+  });
 }
 
 exports.webhook = async (req, res) => {
