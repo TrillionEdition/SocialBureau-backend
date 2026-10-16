@@ -33,6 +33,34 @@ const campaignSchema = new mongoose.Schema({
   campaignStatus: { type: String, enum: ["Pending Payment", "Paid", "Scheduled", "In Progress", "Completed", "Cancelled"], default: "Pending Payment", index: true },
   statusHistory: [{ status: String, adminId: mongoose.Schema.Types.ObjectId, adminName: String, changedAt: { type: Date, default: Date.now } }],
   processedWebhookEventIds: { type: [String], default: [] },
+  youtubeAnalyticsCache: {
+    videoId: String,
+    fetchedAt: Date,
+    views: Number,
+    likes: Number,
+    comments: Number,
+    history: [{ views: Number, capturedAt: Date, _id: false }],
+  },
+  youtubePrivateAnalyticsCache: {
+    channelId: String,
+    startDate: String,
+    endDate: String,
+    fetchedAt: Date,
+    views: Number,
+    estimatedMinutesWatched: Number,
+    averageViewDuration: Number,
+    subscribersGained: Number,
+    subscribersLost: Number,
+    rows: [{
+      day: String,
+      views: Number,
+      estimatedMinutesWatched: Number,
+      averageViewDuration: Number,
+      subscribersGained: Number,
+      subscribersLost: Number,
+      _id: false,
+    }],
+  },
 }, { timestamps: true });
 
 campaignSchema.index({ campaignStatus: 1, paymentStatus: 1, campaignStartAt: 1 });

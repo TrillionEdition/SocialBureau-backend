@@ -3,6 +3,7 @@ const { rateLimit } = require("express-rate-limit");
 const controller = require("../controllers/campaignController");
 const userAuthentication = require("../middlewares/userAuthentication");
 const adminAuthentication = require("../middlewares/adminAuthentication");
+const youtubeAnalyticsController = require("../controllers/youtubeAnalyticsController");
 
 const router = express.Router();
 const campaignLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: true, legacyHeaders: false });
@@ -22,7 +23,13 @@ router.get("/campaigns/pricing", controller.getPricing);
 router.get("/campaigns/admin", ...adminOnly, controller.adminList);
 router.get("/campaigns/admin/export", ...adminOnly, controller.exportCsv);
 router.patch("/campaigns/admin/:bookingId", ...adminOnly, controller.adminUpdate);
+router.get("/campaigns/mine", userAuthentication, controller.getClientCampaigns);
 router.get("/campaigns", userAuthentication, controller.getOwnCampaigns);
+router.get("/campaigns/youtube/callback", youtubeAnalyticsController.oauthCallback);
+router.get("/campaigns/:campaignId/youtube/connect", userAuthentication, youtubeAnalyticsController.startOAuth);
+router.post("/campaigns/:campaignId/youtube/disconnect", userAuthentication, youtubeAnalyticsController.disconnect);
+router.get("/campaigns/:campaignId/youtube/analytics", userAuthentication, campaignLimiter, youtubeAnalyticsController.getPrivateAnalytics);
+router.get("/campaigns/:campaignId/analytics", userAuthentication, campaignLimiter, controller.getCampaignAnalytics);
 router.get("/campaigns/:bookingId", optionalAuth, controller.getCampaign);
 
 module.exports = router;

@@ -3,6 +3,7 @@ const Campaign = require("../models/Campaign");
 const { createInvoiceForCampaign } = require("../services/invoiceService");
 const sendMail = require("../utils/sendMail");
 const { getCampaignPricingConfig, validateCampaignBooking } = require("../services/campaignService");
+const { extractYoutubeVideoId, fetchPublicVideoStatistics } = require("../services/youtubeAnalyticsService");
 const { verifyPaymentSignature, verifyWebhookSignature, hashAccessToken, makeRazorpay } = require("../utils/campaignPayment");
 
 const bookingFields = ["clientName", "clientEmail", "channelName", "channelId", "channelUrl", "campaignStartAt", "durationMinutes", "requestedViews", "campaignType", "videoTitle", "seoKeywords", "videoTags", "videoDescription", "t1", "t2", "t3", "clientNotes"];
@@ -12,6 +13,8 @@ const safeCampaign = (campaign) => {
   delete result.accessTokenHash;
   delete result.processedWebhookEventIds;
   delete result.idempotencyKey;
+  delete result.youtubeAnalyticsCache;
+  delete result.youtubePrivateAnalyticsCache;
   return result;
 };
 const clientCampaign = (campaign) => {
@@ -183,9 +186,85 @@ exports.getCampaign = async (req, res) => {
 exports.getOwnCampaigns = async (req, res) => {
   const isAdmin = ["admin", "partner", "partnership"].includes(String(req.user.role || "").toLowerCase());
   if (isAdmin) return exports.adminList(req, res);
-  const campaigns = await Campaign.find({ clientId: req.user.id }).sort({ createdAt: -1 });
+  return exports.getClientCampaigns(req, res);
+};
+
+exports.getClientCampaigns = async (req, res) => {
+  const ownership = [{ clientId: req.user.id }];
+  if (req.user.email) ownership.push({ clientId: null, clientEmail: req.user.email.toLowerCase().trim() });
+  const campaigns = await Campaign.find({ $or: ownership }).sort({ createdAt: -1 });
   return res.json({ campaigns: campaigns.map(clientCampaign) });
 };
+
+exports.getCampaignAnalytics = async (req, res) => {
+  const ownerClauses = [];
+  if (req.user.id) ownerClauses.push({ clientId: req.user.id });
+  if (req.user.email) ownerClauses.push({ clientId: null, clientEmail: req.user.email.toLowerCase().trim() });
+  const identifier = Campaign.db.base.isValidObjectId(req.params.campaignId)
+    ? { _id: req.params.campaignId }
+    : { bookingId: req.params.campaignId };
+  const campaign = await Campaign.findOne({ ...identifier, $or: ownerClauses });
+  if (!campaign) return res.status(404).json({ message: "Campaign not found" });
+
+  const cache = campaign.youtubeAnalyticsCache;
+  const cacheIsFresh = cache?.fetchedAt && Date.now() - new Date(cache.fetchedAt).getTime() < 15 * 60 * 1000;
+  const useCached = cache && cacheIsFresh && req.query.refresh !== "1";
+  if (useCached) return res.json({ campaign: clientCampaign(campaign), analytics: formatAnalytics(cache, "available") });
+
+  const videoId = extractYoutubeVideoId(campaign.channelUrl);
+  if (!videoId) {
+    return res.json({ campaign: clientCampaign(campaign), analytics: unavailableAnalytics(null, "The booking does not contain a valid YouTube video URL.") });
+  }
+
+  try {
+    const statistics = await fetchPublicVideoStatistics(videoId);
+    if (!statistics.available) {
+      const message = statistics.reason === "missing_api_key"
+        ? "Public YouTube statistics are not configured."
+        : "Public statistics are unavailable for this video.";
+      return res.json({ campaign: clientCampaign(campaign), analytics: unavailableAnalytics(cache?.videoId === videoId ? cache : null, message) });
+    }
+
+    const fetchedAt = new Date();
+    const history = [...(cache?.videoId === videoId ? cache.history || [] : [])];
+    const lastSnapshot = history[history.length - 1];
+    if (!lastSnapshot || fetchedAt.getTime() - new Date(lastSnapshot.capturedAt).getTime() >= 60 * 60 * 1000) {
+      history.push({ views: statistics.views, capturedAt: fetchedAt });
+    }
+    campaign.youtubeAnalyticsCache = {
+      videoId,
+      fetchedAt,
+      views: statistics.views,
+      likes: statistics.likes,
+      comments: statistics.comments,
+      history: history.slice(-90),
+    };
+    await campaign.save();
+    return res.json({ campaign: clientCampaign(campaign), analytics: formatAnalytics(campaign.youtubeAnalyticsCache, "available") });
+  } catch (error) {
+    console.error("YouTube campaign analytics fetch failed:", error.message);
+    return res.json({ campaign: clientCampaign(campaign), analytics: unavailableAnalytics(cache?.videoId === videoId ? cache : null, "YouTube statistics could not be refreshed. Try again later.") });
+  }
+};
+
+function formatAnalytics(cache, status) {
+  return {
+    status,
+    actualViews: cache.views,
+    likes: cache.likes ?? null,
+    comments: cache.comments ?? null,
+    subscribersGained: null,
+    history: (cache.history || []).map(({ views, capturedAt }) => ({ views, capturedAt })),
+    lastUpdatedAt: cache.fetchedAt,
+    message: null,
+  };
+}
+
+function unavailableAnalytics(cache, message) {
+  return cache
+    ? { ...formatAnalytics(cache, "stale"), message }
+    : { status: "unavailable", actualViews: null, likes: null, comments: null, subscribersGained: null, history: [], lastUpdatedAt: null, message };
+}
 
 exports.adminList = async (req, res) => {
   const { page = 1, limit = 25, search, paymentStatus, campaignStatus, campaignType, from, to } = req.query;

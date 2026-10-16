@@ -26,7 +26,7 @@ const userAuthentication = (req, res, next) => {
         return next();
     } catch (err) {
         if (err && err.name === 'TokenExpiredError') {
-            return res.status(401).json({ message: 'jwt expired' });
+            return res.status(401).json({ message: 'Please log in again' });
         }
         return res.status(401).json({ message: 'User not authenticated' });
     }

@@ -6,7 +6,7 @@ const money = (value, currency = "INR") => `${currency === "INR" ? "Rs." : curre
 const istDate = (value) => new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium" }).format(new Date(value));
 
 const LOGOS = {
-  socialBureau: "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/SB_sticker-02_1_k3ulwd.png",
+  socialBureau: "https://pub-dbc24446d37a40aeb1dfdd10992cd2d9.r2.dev/socialbureau-media/images/ChatGPT%20Image%20Jul%201%2C%202026%2C%2007_32_10%20PM.png",
   trillionEdition: "https://pub-7b4bafb3da7d4c758183e371fbae58c2.r2.dev/fa6dbee8-2117-40a6-a15b-c1bec5d21fad%20(1).png",
   razorpay: "https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/razorpay-icon.png",
 };
