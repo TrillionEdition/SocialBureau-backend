@@ -2,10 +2,13 @@ const envNumber = (name, fallback) => {
   const value = Number(process.env[name]);
   return process.env[name] !== undefined && process.env[name] !== "" && Number.isFinite(value) && value >= 0 ? value : fallback;
 };
+const CampaignPricingSettings = require("../models/CampaignPricingSettings");
+
+const DEFAULT_CAMPAIGN_RATES = Object.freeze({ Basic: 350, "Age-Restricted": 500 });
 
 const CAMPAIGN_PRICING = Object.freeze({
-  Basic: Object.freeze({ ratePerHour: envNumber("CAMPAIGN_RATE_BASIC", 350), maxViews: envNumber("CAMPAIGN_MAX_VIEWS_BASIC", 20000) }),
-  "Age-Restricted": Object.freeze({ ratePerHour: envNumber("CAMPAIGN_RATE_AGE_RESTRICTED", 500), maxViews: envNumber("CAMPAIGN_MAX_VIEWS_AGE_RESTRICTED", 35000) }),
+  Basic: Object.freeze({ maxViews: envNumber("CAMPAIGN_MAX_VIEWS_BASIC", 20000) }),
+  "Age-Restricted": Object.freeze({ maxViews: envNumber("CAMPAIGN_MAX_VIEWS_AGE_RESTRICTED", 35000) }),
   gstRate: envNumber("CAMPAIGN_GST_RATE", 18),
   razorpayFeeRate: envNumber("CAMPAIGN_RAZORPAY_FEE_RATE", 3),
   minViews: 1000,
@@ -19,14 +22,47 @@ function calculateCampaignEndAt(startAt, durationMinutes) {
   return new Date(new Date(startAt).getTime() + durationMinutes * 60 * 1000);
 }
 
-function calculateCampaignPrice(requestedViews, durationMinutes, campaignType) {
+function validateCampaignRates(rates) {
+  const validated = {};
+  for (const campaignType of Object.keys(DEFAULT_CAMPAIGN_RATES)) {
+    const rate = rates && rates[campaignType];
+    const paise = Number(rate) * 100;
+    if (typeof rate !== "number" || !Number.isFinite(rate) || rate < 0 || Math.abs(paise - Math.round(paise)) > Number.EPSILON * Math.max(1, Math.abs(paise)) * 2) {
+      throw new Error(`${campaignType} rate must be a finite, non-negative amount with at most two decimal places`);
+    }
+    validated[campaignType] = rate;
+  }
+  return validated;
+}
+
+async function getSavedCampaignRates(settingsModel = CampaignPricingSettings) {
+  const settings = await settingsModel.findOneAndUpdate(
+    { _id: "campaign-pricing" },
+    { $setOnInsert: { rates: DEFAULT_CAMPAIGN_RATES } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+  return validateCampaignRates(settings.rates);
+}
+
+async function updateSavedCampaignRates(rates, settingsModel = CampaignPricingSettings) {
+  const validatedRates = validateCampaignRates(rates);
+  const settings = await settingsModel.findOneAndUpdate(
+    { _id: "campaign-pricing" },
+    { $set: { rates: validatedRates } },
+    { upsert: true, new: true, runValidators: true },
+  );
+  return validateCampaignRates(settings.rates);
+}
+
+function calculateCampaignPrice(requestedViews, durationMinutes, campaignType, rates = DEFAULT_CAMPAIGN_RATES) {
+  const validatedRates = validateCampaignRates(rates);
   const category = CAMPAIGN_PRICING[campaignType];
-  if (!category || !category.ratePerHour || !Number.isInteger(requestedViews) || requestedViews < 1 || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
+  if (!category || !Number.isInteger(requestedViews) || requestedViews < 1 || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
     throw new Error("Invalid campaign type, views or duration");
   }
 
   // Rate is per 1,000 views per hour.
-  const basePaise = roundPaise(category.ratePerHour * 100 * (requestedViews / 1000) * durationMinutes / 60);
+  const basePaise = roundPaise(validatedRates[campaignType] * 100 * (requestedViews / 1000) * durationMinutes / 60);
   const gstPaise = roundPaise(basePaise * CAMPAIGN_PRICING.gstRate / 100);
   const subtotalPaise = basePaise + gstPaise;
   const processingFeePaise = roundPaise(subtotalPaise * CAMPAIGN_PRICING.razorpayFeeRate / 100);
@@ -39,18 +75,15 @@ function calculateCampaignPrice(requestedViews, durationMinutes, campaignType) {
     subtotal: subtotalPaise / 100,
     estimatedRazorpayFee: processingFeePaise / 100,
     estimatedRazorpayFeeGst: processingFeeGstPaise / 100,
-    // TEST OVERRIDE (revert after testing): restore the two commented lines and delete the two TEST lines.
-    // total: totalPaise / 100,
-    // totalPaise,
-    total: 2, // TEST
-    totalPaise: 200, // TEST
+    total: totalPaise / 100,
+    totalPaise,
     currency: "INR",
   };
 }
 
-function getCampaignPricingConfig() {
+function getCampaignPricingConfig(rates = DEFAULT_CAMPAIGN_RATES) {
   return {
-    rates: { Basic: CAMPAIGN_PRICING.Basic.ratePerHour, "Age-Restricted": CAMPAIGN_PRICING["Age-Restricted"].ratePerHour },
+    rates: validateCampaignRates(rates),
     gstRate: CAMPAIGN_PRICING.gstRate,
     razorpayFeeRate: CAMPAIGN_PRICING.razorpayFeeRate,
     minViews: CAMPAIGN_PRICING.minViews,
@@ -74,7 +107,7 @@ function isYoutubeVideoUrl(value) {
   return /^\/(?:live|shorts|embed)\/[\w-]{6,}\/?$/.test(url.pathname);
 }
 
-function validateCampaignBooking(input, now = Date.now()) {
+function validateCampaignBooking(input, now = Date.now(), rates = DEFAULT_CAMPAIGN_RATES) {
   const required = ["clientName", "clientEmail", "channelName", "channelId", "channelUrl", "campaignStartAt", "durationMinutes", "requestedViews", "campaignType"];
   for (const field of required) {
     if (input[field] === undefined || input[field] === null || String(input[field]).trim() === "") {
@@ -111,8 +144,18 @@ function validateCampaignBooking(input, now = Date.now()) {
   if (maxViews && requestedViews > maxViews) {
     throw new Error(`Above ${maxViews.toLocaleString("en-IN")} views for ${input.campaignType} needs a custom rate. Please contact SocialBureau.`);
   }
-  const pricingBreakdown = calculateCampaignPrice(requestedViews, durationMinutes, input.campaignType);
+  const pricingBreakdown = calculateCampaignPrice(requestedViews, durationMinutes, input.campaignType, rates);
   return { startAt, endAt: calculateCampaignEndAt(startAt, durationMinutes), durationMinutes, requestedViews, pricingBreakdown };
 }
 
-module.exports = { CAMPAIGN_PRICING, calculateCampaignEndAt, calculateCampaignPrice, getCampaignPricingConfig, validateCampaignBooking };
+module.exports = {
+  CAMPAIGN_PRICING,
+  DEFAULT_CAMPAIGN_RATES,
+  calculateCampaignEndAt,
+  calculateCampaignPrice,
+  getCampaignPricingConfig,
+  getSavedCampaignRates,
+  updateSavedCampaignRates,
+  validateCampaignBooking,
+  validateCampaignRates,
+};

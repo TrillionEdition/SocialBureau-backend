@@ -1,6 +1,13 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { calculateCampaignEndAt, calculateCampaignPrice, validateCampaignBooking } = require("./campaignService");
+const {
+  calculateCampaignEndAt,
+  calculateCampaignPrice,
+  getSavedCampaignRates,
+  updateSavedCampaignRates,
+  validateCampaignBooking,
+  validateCampaignRates,
+} = require("./campaignService");
 
 const baseInput = {
   clientName: "Client",
@@ -30,6 +37,33 @@ test("calculates hourly totals in paise", () => {
 test("prices fractional hours", () => {
   assert.equal(calculateCampaignPrice(1000, 90, "Basic").baseAmount, 525);
   assert.equal(calculateCampaignPrice(1000, 30, "Age-Restricted").baseAmount, 250);
+});
+
+test("saved campaign rates persist and affect new booking prices", async () => {
+  const settingsModel = {
+    document: null,
+    async findOneAndUpdate(filter, update) {
+      if (!this.document && update.$setOnInsert) {
+        this.document = { _id: filter._id, ...structuredClone(update.$setOnInsert) };
+      }
+      if (update.$set) Object.assign(this.document, structuredClone(update.$set));
+      return structuredClone(this.document);
+    },
+  };
+
+  assert.deepEqual(await getSavedCampaignRates(settingsModel), { Basic: 350, "Age-Restricted": 500 });
+  await updateSavedCampaignRates({ Basic: 425.75, "Age-Restricted": 610 }, settingsModel);
+  assert.deepEqual(await getSavedCampaignRates(settingsModel), { Basic: 425.75, "Age-Restricted": 610 });
+
+  const now = Date.UTC(2026, 0, 1);
+  const booking = validateCampaignBooking({ ...baseInput, campaignStartAt: new Date(now + 31 * 60 * 1000).toISOString() }, now, await getSavedCampaignRates(settingsModel));
+  assert.equal(booking.pricingBreakdown.baseAmount, 4257.5);
+});
+
+test("campaign rates require finite non-negative amounts with two-decimal precision", () => {
+  assert.throws(() => validateCampaignRates({ Basic: -1, "Age-Restricted": 500 }), /non-negative/);
+  assert.throws(() => validateCampaignRates({ Basic: 350.001, "Age-Restricted": 500 }), /two decimal places/);
+  assert.throws(() => validateCampaignRates({ Basic: Infinity, "Age-Restricted": 500 }), /finite/);
 });
 
 test("rejects invalid duration and type", () => {

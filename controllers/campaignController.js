@@ -2,7 +2,13 @@ const crypto = require("crypto");
 const Campaign = require("../models/Campaign");
 const { createInvoiceForCampaign } = require("../services/invoiceService");
 const sendMail = require("../utils/sendMail");
-const { getCampaignPricingConfig, validateCampaignBooking } = require("../services/campaignService");
+const {
+  calculateCampaignPrice,
+  getCampaignPricingConfig,
+  getSavedCampaignRates,
+  updateSavedCampaignRates,
+  validateCampaignBooking,
+} = require("../services/campaignService");
 const { extractYoutubeVideoId, fetchPublicVideoStatistics } = require("../services/youtubeAnalyticsService");
 const { verifyPaymentSignature, verifyWebhookSignature, hashAccessToken, makeRazorpay } = require("../utils/campaignPayment");
 
@@ -41,7 +47,8 @@ exports.createCampaign = async (req, res) => {
         return res.status(400).json({ message: `${field} is too long` });
       }
     }
-    const validated = validateCampaignBooking(input);
+    const rates = await getSavedCampaignRates();
+    const validated = validateCampaignBooking(input, Date.now(), rates);
     const suppliedKey = req.get("Idempotency-Key");
     const accessToken = suppliedKey && /^[A-Za-z0-9_-]{32,128}$/.test(suppliedKey) ? suppliedKey : crypto.randomBytes(32).toString("hex");
     const bookingId = `SBYT-${crypto.randomBytes(6).toString("hex").toUpperCase()}`;
@@ -337,4 +344,41 @@ exports.exportCsv = async (req, res) => {
   return res.send(lines.join("\r\n"));
 };
 
-exports.getPricing = (req, res) => res.json(getCampaignPricingConfig());
+exports.getPricing = async (req, res) => {
+  try {
+    const rates = await getSavedCampaignRates();
+    const publicConfig = getCampaignPricingConfig(rates);
+    delete publicConfig.rates;
+    return res.json(publicConfig);
+  } catch (error) {
+    return res.status(500).json({ message: error.message || "Campaign pricing is unavailable" });
+  }
+};
+
+exports.getCampaignQuote = async (req, res) => {
+  try {
+    const { requestedViews, durationMinutes, campaignType } = req.body || {};
+    const rates = await getSavedCampaignRates();
+    const pricingBreakdown = calculateCampaignPrice(Number(requestedViews), Number(durationMinutes), campaignType, rates);
+    return res.json({ pricingBreakdown });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || "Unable to calculate campaign price" });
+  }
+};
+
+exports.getCampaignRates = async (req, res) => {
+  try {
+    return res.json({ rates: await getSavedCampaignRates() });
+  } catch (error) {
+    return res.status(500).json({ message: error.message || "Campaign rates are unavailable" });
+  }
+};
+
+exports.updateCampaignRates = async (req, res) => {
+  try {
+    const rates = await updateSavedCampaignRates(req.body && req.body.rates);
+    return res.json({ rates });
+  } catch (error) {
+    return res.status(400).json({ message: error.message || "Unable to update campaign rates" });
+  }
+};
