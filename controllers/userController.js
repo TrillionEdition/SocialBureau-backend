@@ -8,6 +8,7 @@ const Tool = require("../models/toolModel")
 const Client = require("../models/clientsModel")
 const Subscriber = require("../models/Subscriber");
 const sendMail = require("../utils/sendMail_disabled");
+const sendPasswordResetMail = require("../utils/sendMail");
 const emailService = require("../services/emailService");
 const blogJobTemplate = require("../utils/blogEmailTemplate");
 const { getLatestPublishedBlog, getLatestActiveJob } = require("../services/blogService");
@@ -905,19 +906,25 @@ const userController = {
       throw new Error("Email not found in our security database.");
     }
 
-    // Safety check for production email configuration
-    if (!process.env.MAIL_USER) {
-      console.error("[AUTH ERROR] MAIL_USER is not configured in environment variables.");
+    // Match the configuration options supported by utils/sendMail.
+    const senderEmail = process.env.BREVO_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER;
+    const mailConfigured = process.env.BREVO_SMTP_KEY
+      ? Boolean(process.env.BREVO_SMTP_USER && senderEmail)
+      : process.env.SENDGRID_API_KEY
+        ? Boolean(senderEmail)
+        : Boolean(process.env.MAIL_USER && process.env.MAIL_PASS);
+
+    if (!mailConfigured) {
+      console.error("[AUTH ERROR] Email transport configuration is incomplete.");
       res.status(500);
       throw new Error("Server security configuration is incomplete. Please contact the administrator.");
     }
 
     // Generate 6-digit numeric OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString();
 
     // Store OTP in Redis/Memory with 10 minute expiry
     try {
-      console.log(`[OTP] Storing code for ${email.toLowerCase().trim()}: ${otp}`);
       await storeVerificationCode(email.toLowerCase().trim(), otp, 600);
     } catch (redisError) {
       console.warn("OTP Storage warning:", redisError.message);
@@ -929,7 +936,7 @@ const userController = {
     console.log(`[AUTH] Attempting to send OTP to: ${targetEmail}`);
 
     try {
-      await sendMail({
+      await sendPasswordResetMail({
         to: targetEmail,
         subject: "Verification Protocol - SocialBureau Identity",
         html: `
@@ -977,10 +984,7 @@ const userController = {
       const normalizedEmail = email.toLowerCase().trim();
       const storedOtp = await getVerificationCode(normalizedEmail);
 
-      console.log(`[OTP] Verifying for ${normalizedEmail}. Provided: ${otp}, Stored: ${storedOtp}`);
-
       if (!storedOtp || storedOtp !== otp) {
-        console.log(`[OTP] Mismatch or expired for ${normalizedEmail}`);
         res.status(400);
         throw new Error("Invalid or expired OTP");
       }
