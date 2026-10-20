@@ -2,6 +2,7 @@ const Razorpay = require("razorpay");
 const crypto = require("crypto");
 const User = require("../models/userModel");
 const Partnership = require("../models/partnershipModel");
+const DynamicReport = require("../modules/dynamicReports/dynamicReportModel");
 
 /**
  * Initialize Razorpay Instance
@@ -204,5 +205,76 @@ exports.verifyPagePayment = async (req, res) => {
   } catch (error) {
     console.error("Page Payment Verification Error:", error);
     res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+exports.createDynamicReportOrder = async (req, res) => {
+  try {
+    const report = await DynamicReport.findOne({ slug: req.params.slug, status: "published" }).lean();
+    if (!report) return res.status(404).json({ success: false, message: "Report not found" });
+
+    const amount = Number.isFinite(report.viewingPrice) ? report.viewingPrice : 2;
+    if (amount <= 0) return res.status(400).json({ success: false, message: "This report does not require payment" });
+
+    const accessKey = `dynamic-report-${report.slug}`;
+    const user = await User.findById(req.user.id).select("paidPages").lean();
+    if (user?.paidPages?.includes(accessKey)) {
+      return res.status(409).json({ success: false, message: "This report is already unlocked" });
+    }
+
+    const order = await razorpay.orders.create({
+      amount: Math.round(amount * 100),
+      currency: "INR",
+      receipt: `report_${Date.now()}`,
+      notes: { purpose: "dynamic-report", reportSlug: report.slug, userId: String(req.user.id) },
+    });
+    return res.status(200).json({ success: true, order });
+  } catch (error) {
+    console.error("Dynamic Report Order Error:", error);
+    return res.status(500).json({ success: false, message: "Could not create report payment order" });
+  }
+};
+
+exports.verifyDynamicReportPayment = async (req, res) => {
+  try {
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body || {};
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
+      return res.status(400).json({ success: false, message: "Payment details are required" });
+    }
+
+    const report = await DynamicReport.findOne({ slug: req.params.slug, status: "published" }).lean();
+    if (!report) return res.status(404).json({ success: false, message: "Report not found" });
+
+    const amount = Number.isFinite(report.viewingPrice) ? report.viewingPrice : 2;
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+    if (razorpay_signature !== expectedSignature) {
+      return res.status(400).json({ success: false, message: "Invalid payment signature" });
+    }
+
+    const order = await razorpay.orders.fetch(razorpay_order_id);
+    if (
+      order.amount !== Math.round(amount * 100)
+      || order.currency !== "INR"
+      || order.notes?.purpose !== "dynamic-report"
+      || order.notes?.reportSlug !== report.slug
+      || order.notes?.userId !== String(req.user.id)
+      || order.status !== "paid"
+    ) {
+      return res.status(400).json({ success: false, message: "Payment order does not match this report" });
+    }
+
+    const payment = await razorpay.payments.fetch(razorpay_payment_id);
+    if (payment.order_id !== order.id || payment.amount !== order.amount || payment.status !== "captured") {
+      return res.status(400).json({ success: false, message: "Payment is not captured for this report" });
+    }
+
+    await User.findByIdAndUpdate(req.user.id, { $addToSet: { paidPages: `dynamic-report-${report.slug}` } });
+    return res.status(200).json({ success: true, message: "Report unlocked" });
+  } catch (error) {
+    console.error("Dynamic Report Payment Verification Error:", error);
+    return res.status(500).json({ success: false, message: "Could not verify report payment" });
   }
 };

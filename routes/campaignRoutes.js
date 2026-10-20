@@ -7,6 +7,13 @@ const youtubeAnalyticsController = require("../controllers/youtubeAnalyticsContr
 
 const router = express.Router();
 const campaignLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: true, legacyHeaders: false });
+const campaignAnalyticsLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user.id,
+});
 const optionalAuth = (req, res, next) => {
   const token = req.cookies && req.cookies.token;
   const header = req.headers.authorization;
@@ -31,8 +38,8 @@ router.get("/campaigns", userAuthentication, controller.getOwnCampaigns);
 router.get("/campaigns/youtube/callback", youtubeAnalyticsController.oauthCallback);
 router.get("/campaigns/:campaignId/youtube/connect", userAuthentication, youtubeAnalyticsController.startOAuth);
 router.post("/campaigns/:campaignId/youtube/disconnect", userAuthentication, youtubeAnalyticsController.disconnect);
-router.get("/campaigns/:campaignId/youtube/analytics", userAuthentication, campaignLimiter, youtubeAnalyticsController.getPrivateAnalytics);
-router.get("/campaigns/:campaignId/analytics", userAuthentication, campaignLimiter, controller.getCampaignAnalytics);
+router.get("/campaigns/:campaignId/youtube/analytics", userAuthentication, campaignAnalyticsLimiter, youtubeAnalyticsController.getPrivateAnalytics);
+router.get("/campaigns/:campaignId/analytics", userAuthentication, campaignAnalyticsLimiter, controller.getCampaignAnalytics);
 router.get("/campaigns/:bookingId", optionalAuth, controller.getCampaign);
 
 module.exports = router;

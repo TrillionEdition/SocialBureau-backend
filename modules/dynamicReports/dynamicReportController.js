@@ -2,10 +2,12 @@ const asyncHandler = require("express-async-handler");
 const sanitizeHtml = require("sanitize-html");
 const slugify = require("slugify");
 const DynamicReport = require("./dynamicReportModel");
+const User = require("../../models/userModel");
 const uploadService = require("../../middlewares/cloudflare");
 
 const MAX_SECTIONS = 40;
 const MAX_TEXT_LENGTH = 30000;
+const DEFAULT_VIEWING_PRICE = 2;
 const richTextOptions = {
   allowedTags: ["p", "br", "h2", "h3", "h4", "strong", "b", "em", "i", "u", "s", "ul", "ol", "li", "blockquote", "a", "code", "pre"],
   allowedAttributes: { a: ["href", "target", "rel"] },
@@ -31,6 +33,14 @@ function secureUrl(value, fieldName) {
     if (error.status) throw error;
     invalid(`${fieldName} must be a valid HTTPS URL`);
   }
+}
+
+function cleanViewingPrice(value) {
+  const price = Number(value);
+  if (!Number.isFinite(price) || price < 0 || price > 100000) {
+    invalid("Viewing price must be between ₹0 and ₹100,000");
+  }
+  return Math.round(price * 100) / 100;
 }
 
 function cleanSections(sections) {
@@ -95,7 +105,7 @@ const controller = {
   }),
 
   createAdmin: asyncHandler(async (req, res) => {
-    const { title, subtitle, coverImageUrl, sections = [], status = "draft", slug } = req.body;
+    const { title, subtitle, coverImageUrl, sections = [], status = "draft", slug, viewingPrice = DEFAULT_VIEWING_PRICE } = req.body;
     if (!title || !String(title).trim()) invalid("Report title is required");
     if (!["draft", "published"].includes(status)) invalid("Invalid report status");
     const report = await DynamicReport.create({
@@ -103,6 +113,7 @@ const controller = {
       slug: await uniqueSlug(title, slug),
       subtitle: String(subtitle || "").trim(),
       coverImageUrl: secureUrl(coverImageUrl, "Cover image URL"),
+      viewingPrice: cleanViewingPrice(viewingPrice),
       sections: cleanSections(sections),
       status,
       createdBy: req.user.name || req.user.email || "Admin",
@@ -113,7 +124,7 @@ const controller = {
   updateAdmin: asyncHandler(async (req, res) => {
     const report = await DynamicReport.findById(req.params.id);
     if (!report) return res.status(404).json({ success: false, message: "Report not found" });
-    const { title, subtitle, coverImageUrl, sections, status, slug } = req.body;
+    const { title, subtitle, coverImageUrl, sections, status, slug, viewingPrice } = req.body;
     if (status !== undefined && !["draft", "published"].includes(status)) invalid("Invalid report status");
     if (title !== undefined) {
       if (!String(title).trim()) invalid("Report title is required");
@@ -121,6 +132,7 @@ const controller = {
     }
     if (subtitle !== undefined) report.subtitle = String(subtitle).trim();
     if (coverImageUrl !== undefined) report.coverImageUrl = secureUrl(coverImageUrl, "Cover image URL");
+    if (viewingPrice !== undefined) report.viewingPrice = cleanViewingPrice(viewingPrice);
     if (sections !== undefined) report.sections = cleanSections(sections);
     if (status !== undefined) report.status = status;
     if (slug !== undefined) report.slug = await uniqueSlug(report.title, slug, report._id);
@@ -155,8 +167,16 @@ const controller = {
   getPublic: asyncHandler(async (req, res) => {
     const report = await DynamicReport.findOne({ slug: req.params.slug, status: "published" }).lean();
     if (!report) return res.status(404).json({ success: false, message: "Report not found" });
-    res.set("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
-    res.json({ success: true, data: report });
+    const viewingPrice = Number.isFinite(report.viewingPrice) ? report.viewingPrice : DEFAULT_VIEWING_PRICE;
+    const accessKey = `dynamic-report-${report.slug}`;
+    const user = viewingPrice > 0 && req.user
+      ? await User.findById(req.user.id).select("paidPages").lean()
+      : null;
+    const hasAccess = viewingPrice === 0 || !!user?.paidPages?.includes(accessKey);
+    const publicReport = { ...report, viewingPrice, requiresPayment: !hasAccess };
+    if (!hasAccess) publicReport.sections = [];
+    res.set("Cache-Control", "private, no-store");
+    res.json({ success: true, data: publicReport });
   }),
 };
 

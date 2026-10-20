@@ -21,6 +21,7 @@ const dynamicReportSchema = new mongoose.Schema(
     slug: { type: String, required: true, unique: true, index: true },
     subtitle: { type: String, trim: true, maxlength: 300, default: "" },
     coverImageUrl: { type: String, default: "" },
+    viewingPrice: { type: Number, min: 0, default: 2 },
     status: { type: String, enum: ["draft", "published"], default: "draft", index: true },
     sections: { type: [reportSectionSchema], default: [] },
     createdBy: { type: String, default: "" },
