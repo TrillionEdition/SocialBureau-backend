@@ -6,7 +6,7 @@ dns.setDefaultResultOrder("ipv4first");
 
 /**
  * PRODUCTION-READY MAILER
- * Supports Gmail (Local) and SendGrid (Production/Render)
+ * Supports Brevo, SendGrid, and Gmail SMTP
  * Port 2525 is used for SendGrid to bypass Render's firewall blocks.
  */
 
@@ -38,7 +38,7 @@ const createTransporter = () => {
   } 
   // 🛡️ MODE 2: Gmail (Fallback/Local)
   else {
-    console.log("⏱️  [MAILER] No SendGrid key found. Initializing Gmail fallback...");
+    console.log("⏱️  [MAILER] No SMTP provider key found. Initializing Gmail fallback...");
     return nodemailer.createTransport({
       service: "gmail",
       auth: {
@@ -74,7 +74,7 @@ const sendMail = async ({ to, subject, html }) => {
       console.log("🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
-    throw new Error(`Email delivery failed: ${err.message}. If using Render, please provide a SENDGRID_API_KEY and ensure it's not a firewall block.`);
+    throw new Error(`Email delivery failed: ${err.message}. Check the configured SMTP provider credentials and network access.`);
   }
 };
 
