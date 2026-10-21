@@ -18,8 +18,26 @@ const CAMPAIGN_PRICING = Object.freeze({
 
 const roundPaise = (value) => Math.round(value);
 
-function calculateCampaignEndAt(startAt, durationMinutes) {
-  return new Date(new Date(startAt).getTime() + durationMinutes * 60 * 1000);
+// Prices are pre-tax rupees. Plan C is charged per 1,000 views per hour.
+const CAMPAIGN_PLANS = Object.freeze({
+  A: Object.freeze({ name: "Plan A", views: 6000, durationMinutes: 18 * 60, dailyPrice: 5700, monthlyPrice: 171000, monthlyDays: 30 }),
+  B: Object.freeze({ name: "Plan B", views: 100000, durationMinutes: 60, price: 21200 }),
+  C: Object.freeze({ name: "Plan C", defaultViews: 1000, ratePer1000ViewsPerHour: 250 }),
+});
+const DEFAULT_PLAN = "C";
+
+function resolvePlan(input) {
+  const plan = input.plan === undefined || input.plan === "" ? DEFAULT_PLAN : input.plan;
+  if (!CAMPAIGN_PLANS[plan]) throw new Error("Choose a valid plan (A, B or C)");
+  const billing = plan === "A" && input.billing === "monthly" ? "monthly" : "daily";
+  const config = CAMPAIGN_PLANS[plan];
+  if (plan === "A") return { plan, billing, requestedViews: config.views, durationMinutes: config.durationMinutes, days: billing === "monthly" ? config.monthlyDays : 1, basePrice: billing === "monthly" ? config.monthlyPrice : config.dailyPrice };
+  if (plan === "B") return { plan, billing, requestedViews: config.views, durationMinutes: config.durationMinutes, days: 1, basePrice: config.price };
+  return { plan, billing, requestedViews: Number(input.requestedViews), durationMinutes: Number(input.durationMinutes), days: 1, basePrice: null };
+}
+
+function calculateCampaignEndAt(startAt, durationMinutes, days = 1) {
+  return new Date(new Date(startAt).getTime() + ((days - 1) * 24 * 60 + durationMinutes) * 60 * 1000);
 }
 
 function validateCampaignRates(rates) {
@@ -54,15 +72,17 @@ async function updateSavedCampaignRates(rates, settingsModel = CampaignPricingSe
   return validateCampaignRates(settings.rates);
 }
 
-function calculateCampaignPrice(requestedViews, durationMinutes, campaignType, rates = DEFAULT_CAMPAIGN_RATES) {
+function calculateCampaignPrice(requestedViews, durationMinutes, campaignType, rates = DEFAULT_CAMPAIGN_RATES, planInput = {}) {
   const validatedRates = validateCampaignRates(rates);
   const category = CAMPAIGN_PRICING[campaignType];
-  if (!category || !Number.isInteger(requestedViews) || requestedViews < 1 || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
+  const resolved = resolvePlan({ ...planInput, requestedViews, durationMinutes });
+  if (!category || !Number.isInteger(resolved.requestedViews) || resolved.requestedViews < 1 || !Number.isInteger(resolved.durationMinutes) || resolved.durationMinutes < 1 || resolved.durationMinutes > 1440) {
     throw new Error("Invalid campaign type, views or duration");
   }
 
-  // Rate is per 1,000 views per hour.
-  const basePaise = roundPaise(validatedRates[campaignType] * 100 * (requestedViews / 1000) * durationMinutes / 60);
+  const basePaise = resolved.basePrice !== null
+    ? roundPaise(resolved.basePrice * 100)
+    : roundPaise(CAMPAIGN_PLANS.C.ratePer1000ViewsPerHour * 100 * (resolved.requestedViews / 1000) * resolved.durationMinutes / 60);
   const gstPaise = roundPaise(basePaise * CAMPAIGN_PRICING.gstRate / 100);
   const subtotalPaise = basePaise + gstPaise;
   const processingFeePaise = roundPaise(subtotalPaise * CAMPAIGN_PRICING.razorpayFeeRate / 100);
@@ -78,11 +98,15 @@ function calculateCampaignPrice(requestedViews, durationMinutes, campaignType, r
     total: totalPaise / 100,
     totalPaise,
     currency: "INR",
+    plan: resolved.plan,
+    billing: resolved.billing,
   };
 }
 
 function getCampaignPricingConfig(rates = DEFAULT_CAMPAIGN_RATES) {
   return {
+    plans: CAMPAIGN_PLANS,
+    defaultPlan: DEFAULT_PLAN,
     rates: validateCampaignRates(rates),
     gstRate: CAMPAIGN_PRICING.gstRate,
     razorpayFeeRate: CAMPAIGN_PRICING.razorpayFeeRate,
@@ -131,24 +155,25 @@ function validateCampaignBooking(input, now = Date.now(), rates = DEFAULT_CAMPAI
     throw new Error("Campaign must start at least 30 minutes from now");
   }
 
-  const durationMinutes = Number(input.durationMinutes);
+  const resolved = resolvePlan(input);
+  const durationMinutes = resolved.durationMinutes;
   if (!Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 1440) {
     throw new Error("Duration must be between 1 and 1440 minutes");
   }
 
-  const requestedViews = Number(input.requestedViews);
+  const requestedViews = resolved.requestedViews;
   if (!Number.isInteger(requestedViews) || requestedViews < CAMPAIGN_PRICING.minViews) {
     throw new Error(`Requested views must be at least ${CAMPAIGN_PRICING.minViews}`);
   }
-  const maxViews = CAMPAIGN_PRICING[input.campaignType]?.maxViews;
-  if (maxViews && requestedViews > maxViews) {
-    throw new Error(`Above ${maxViews.toLocaleString("en-IN")} views for ${input.campaignType} needs a custom rate. Please contact SocialBureau.`);
+  if (requestedViews > CAMPAIGN_PRICING.maxViews) {
+    throw new Error(`Requested views cannot exceed ${CAMPAIGN_PRICING.maxViews.toLocaleString("en-IN")}`);
   }
-  const pricingBreakdown = calculateCampaignPrice(requestedViews, durationMinutes, input.campaignType, rates);
-  return { startAt, endAt: calculateCampaignEndAt(startAt, durationMinutes), durationMinutes, requestedViews, pricingBreakdown };
+  const pricingBreakdown = calculateCampaignPrice(requestedViews, durationMinutes, input.campaignType, rates, input);
+  return { startAt, endAt: calculateCampaignEndAt(startAt, durationMinutes, resolved.days), durationMinutes, requestedViews, pricingBreakdown, plan: resolved.plan, billing: resolved.billing };
 }
 
 module.exports = {
+  CAMPAIGN_PLANS,
   CAMPAIGN_PRICING,
   DEFAULT_CAMPAIGN_RATES,
   calculateCampaignEndAt,

@@ -63,6 +63,8 @@ exports.createCampaign = async (req, res) => {
       campaignEndAt: validated.endAt,
       durationMinutes: validated.durationMinutes,
       requestedViews: validated.requestedViews,
+      plan: validated.plan,
+      billing: validated.billing,
       pricingBreakdown: validated.pricingBreakdown,
       bookingId,
       accessTokenHash: hashAccessToken(accessToken),
@@ -357,9 +359,9 @@ exports.getPricing = async (req, res) => {
 
 exports.getCampaignQuote = async (req, res) => {
   try {
-    const { requestedViews, durationMinutes, campaignType } = req.body || {};
+    const { requestedViews, durationMinutes, campaignType, plan, billing } = req.body || {};
     const rates = await getSavedCampaignRates();
-    const pricingBreakdown = calculateCampaignPrice(Number(requestedViews), Number(durationMinutes), campaignType, rates);
+    const pricingBreakdown = calculateCampaignPrice(Number(requestedViews), Number(durationMinutes), campaignType, rates, { plan, billing });
     return res.json({ pricingBreakdown });
   } catch (error) {
     return res.status(400).json({ message: error.message || "Unable to calculate campaign price" });

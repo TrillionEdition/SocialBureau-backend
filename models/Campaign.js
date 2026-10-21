@@ -15,6 +15,8 @@ const campaignSchema = new mongoose.Schema({
   durationMinutes: { type: Number, required: true, min: 1, max: 1440 },
   requestedViews: { type: Number, required: true, min: 1000, max: 10000000 },
   campaignType: { type: String, enum: ["Basic", "Age-Restricted"], required: true, index: true },
+  plan: { type: String, enum: ["A", "B", "C"], default: "C", index: true },
+  billing: { type: String, enum: ["daily", "monthly"], default: "daily" },
   videoTitle: { type: String, default: "", maxlength: 500 },
   seoKeywords: { type: String, default: "", maxlength: 5000 },
   videoTags: { type: String, default: "", maxlength: 5000 },
