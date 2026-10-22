@@ -35,6 +35,10 @@ const userSchema = new mongoose.Schema(
     phone: {
       type: Number,
     },
+    razorpayCustomerId: {
+      type: String,
+      select: false,
+    },
     // Allow multiple tools (e.g., Word, ClickUp, etc.)
     tools: [
       {
