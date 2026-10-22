@@ -4,6 +4,7 @@ const controller = require("../controllers/campaignController");
 const userAuthentication = require("../middlewares/userAuthentication");
 const adminAuthentication = require("../middlewares/adminAuthentication");
 const youtubeAnalyticsController = require("../controllers/youtubeAnalyticsController");
+const walletController = require("../controllers/walletController");
 
 const router = express.Router();
 const campaignLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: true, legacyHeaders: false });
@@ -23,9 +24,13 @@ const optionalAuth = (req, res, next) => {
 const adminOnly = [userAuthentication, adminAuthentication];
 
 router.post("/campaigns", campaignLimiter, optionalAuth, controller.createCampaign);
-router.post("/payments/create-order", campaignLimiter, controller.createOrder);
+router.post("/payments/create-order", campaignLimiter, optionalAuth, controller.createOrder);
 router.post("/payments/verify", campaignLimiter, controller.verifyPayment);
 router.post("/payments/webhook", controller.webhook);
+router.post("/payments/wallet-pay", campaignLimiter, userAuthentication, controller.payWithWallet);
+router.get("/wallet", userAuthentication, walletController.getWallet);
+router.post("/wallet/topup/order", campaignLimiter, userAuthentication, walletController.createTopupOrder);
+router.post("/wallet/topup/verify", campaignLimiter, userAuthentication, walletController.verifyTopup);
 router.get("/campaigns/pricing", controller.getPricing);
 router.post("/campaigns/quote", controller.getCampaignQuote);
 router.get("/campaigns/admin/pricing", ...adminOnly, controller.getCampaignRates);

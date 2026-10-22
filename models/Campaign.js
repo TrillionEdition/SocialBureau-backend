@@ -31,6 +31,7 @@ const campaignSchema = new mongoose.Schema({
   razorpayOrderId: { type: String, default: undefined, unique: true, sparse: true },
   razorpayPaymentId: { type: String, default: undefined, unique: true, sparse: true },
   paymentStatus: { type: String, enum: ["pending", "paid", "failed"], default: "pending", index: true },
+  paymentMethod: { type: String, enum: ["razorpay", "wallet"], default: undefined },
   paidAt: { type: Date, default: null },
   campaignStatus: { type: String, enum: ["Pending Payment", "Paid", "Scheduled", "In Progress", "Completed", "Cancelled"], default: "Pending Payment", index: true },
   statusHistory: [{ status: String, adminId: mongoose.Schema.Types.ObjectId, adminName: String, changedAt: { type: Date, default: Date.now } }],

@@ -1,5 +1,8 @@
 const crypto = require("crypto");
 const Campaign = require("../models/Campaign");
+const User = require("../models/userModel");
+const WalletTransaction = require("../models/WalletTransaction");
+const { creditTopup, debitOnce, refundOnce } = require("../services/walletService");
 const { createInvoiceForCampaign } = require("../services/invoiceService");
 const sendMail = require("../utils/sendMail");
 const {
@@ -86,21 +89,62 @@ exports.createCampaign = async (req, res) => {
 
 exports.createOrder = async (req, res) => {
   try {
+    if (req.body && req.body.saveCard !== undefined && typeof req.body.saveCard !== "boolean") {
+      return res.status(400).json({ message: "saveCard must be a boolean" });
+    }
     const campaign = await Campaign.findOne({ bookingId: req.body.bookingId }).select("+accessTokenHash");
     if (!campaign || !hasBookingAccess(campaign, req.body.accessToken)) {
       return res.status(404).json({ message: "Campaign booking not found" });
     }
     if (campaign.paymentStatus === "paid") return res.status(409).json({ message: "This campaign is already paid." });
+
+    const saveCard = req.body.saveCard === true;
+    let user;
+    let customerId;
+    if (req.user && String(campaign.clientId) === String(req.user.id)) {
+      user = await User.findById(req.user.id).select("+razorpayCustomerId");
+      if (user && String(user.email).toLowerCase() === campaign.clientEmail.toLowerCase()) {
+        customerId = user.razorpayCustomerId;
+      }
+    }
+    if (saveCard && (!user || String(campaign.clientId) !== String(req.user && req.user.id)
+      || String(user.email).toLowerCase() !== campaign.clientEmail.toLowerCase())) {
+      return res.status(403).json({ message: "Sign in with the booking email to save a card." });
+    }
+
+    const razorpay = makeRazorpay();
+    if (saveCard && !customerId) {
+      const customer = await razorpay.customers.create({
+        email: campaign.clientEmail,
+        fail_existing: "0",
+      });
+      customerId = customer.id;
+      user.razorpayCustomerId = customerId;
+      await user.save();
+    }
+
     if (campaign.razorpayOrderId && campaign.paymentStatus === "pending") {
-      return res.json({ orderId: campaign.razorpayOrderId, amount: campaign.pricingBreakdown.totalPaise, currency: "INR", keyId: process.env.RAZORPAY_KEY_ID });
+      return res.json({
+        orderId: campaign.razorpayOrderId,
+        amount: campaign.pricingBreakdown.totalPaise,
+        currency: "INR",
+        keyId: process.env.RAZORPAY_KEY_ID,
+        ...(customerId ? { customerId } : {}),
+      });
     }
 
     const amount = campaign.pricingBreakdown.totalPaise;
-    const order = await makeRazorpay().orders.create({ amount, currency: "INR", receipt: campaign.bookingId });
+    const order = await razorpay.orders.create({ amount, currency: "INR", receipt: campaign.bookingId });
     campaign.razorpayOrderId = order.id;
     campaign.paymentStatus = "pending";
     await campaign.save();
-    return res.status(201).json({ orderId: order.id, amount, currency: "INR", keyId: process.env.RAZORPAY_KEY_ID });
+    return res.status(201).json({
+      orderId: order.id,
+      amount,
+      currency: "INR",
+      keyId: process.env.RAZORPAY_KEY_ID,
+      ...(customerId ? { customerId } : {}),
+    });
   } catch (error) {
     return res.status(502).json({ message: error.message || "Unable to create payment order" });
   }
@@ -118,6 +162,9 @@ exports.verifyPayment = async (req, res) => {
     if (payment.order_id !== orderId || payment.status !== "captured" || payment.amount !== campaign.pricingBreakdown.totalPaise || payment.currency !== "INR") {
       return res.status(409).json({ message: "Payment is not captured for the expected amount yet." });
     }
+    if (await creditDuplicatePayment(campaign, payment)) {
+      return res.status(409).json({ message: "This campaign was already paid from your wallet. The card payment has been credited to your wallet." });
+    }
     await markPaid(campaign, paymentId);
     return res.json({ success: true, campaign: clientCampaign(campaign) });
   } catch (error) {
@@ -125,13 +172,65 @@ exports.verifyPayment = async (req, res) => {
   }
 };
 
+// A captured card payment for a booking already settled from the wallet is credited back to that wallet.
+async function creditDuplicatePayment(campaign, payment) {
+  if (campaign.paymentStatus !== "paid" || campaign.paymentMethod !== "wallet" || !campaign.clientId) return false;
+  await refundOnce({
+    userId: campaign.clientId, amountPaise: payment.amount, reference: `duplicate:${payment.id}`,
+    type: "campaign_refund", bookingId: campaign.bookingId,
+  });
+  return true;
+}
+
+exports.payWithWallet = async (req, res) => {
+  try {
+    const { bookingId } = req.body || {};
+    if (typeof bookingId !== "string") return res.status(400).json({ message: "bookingId is required" });
+    const campaign = await Campaign.findOne({ bookingId });
+    if (!campaign || !campaign.clientId || String(campaign.clientId) !== String(req.user.id)) {
+      return res.status(404).json({ message: "Campaign booking not found" });
+    }
+    if (campaign.paymentStatus === "paid") return res.status(409).json({ message: "This campaign is already paid." });
+
+    const amountPaise = campaign.pricingBreakdown.totalPaise;
+    const reference = `campaign:${campaign.bookingId}`;
+    const debit = await debitOnce({ userId: req.user.id, amountPaise, reference, type: "campaign_payment", bookingId: campaign.bookingId });
+    if (debit.insufficient) return res.status(402).json({ message: "Insufficient wallet balance. Add money to your wallet and try again." });
+    if (debit.duplicate) {
+      const debited = await WalletTransaction.findOne({ reference, status: "completed" });
+      if (!debited) return res.status(409).json({ message: "A wallet payment for this booking is already in progress." });
+    }
+
+    const claimed = await Campaign.findOneAndUpdate(
+      { _id: campaign._id, paymentStatus: { $ne: "paid" } },
+      { $set: { paymentStatus: "paid", paymentMethod: "wallet", paidAt: new Date() } },
+      { new: true },
+    );
+    if (!claimed) {
+      await refundOnce({ userId: req.user.id, amountPaise, reference: `refund:${reference}`, type: "campaign_refund", bookingId: campaign.bookingId });
+      return res.status(409).json({ message: "This campaign is already paid. Your wallet was not charged." });
+    }
+    await Campaign.updateOne({ _id: claimed._id, campaignStatus: "Pending Payment" }, { $set: { campaignStatus: "Paid" } });
+    const paid = await Campaign.findById(claimed._id);
+    runPaidSideEffects(paid);
+    return res.json({ success: true, campaign: clientCampaign(paid) });
+  } catch (error) {
+    return res.status(502).json({ message: "Unable to complete wallet payment" });
+  }
+};
+
 async function markPaid(campaign, paymentId) {
   if (campaign.paymentStatus === "paid") return;
   campaign.paymentStatus = "paid";
+  campaign.paymentMethod = "razorpay";
   campaign.razorpayPaymentId = paymentId;
   campaign.paidAt = new Date();
   if (campaign.campaignStatus === "Pending Payment") campaign.campaignStatus = "Paid";
   await campaign.save();
+  runPaidSideEffects(campaign);
+}
+
+function runPaidSideEffects(campaign) {
   // Runs only after server-verified payment (webhook or Razorpay API fetch); failures must not affect payment.
   createInvoiceForCampaign(campaign).catch((error) => console.error("Invoice creation failed:", error.message));
   notifyCampaignBooked(campaign).catch((error) => console.error("Booking notification failed:", error.message));
@@ -146,7 +245,7 @@ async function notifyCampaignBooked(campaign) {
     ["Type", campaign.campaignType], ["Views", Number(campaign.requestedViews).toLocaleString("en-IN")],
     ["Start (IST)", ist(campaign.campaignStartAt)], ["End (IST)", campaign.campaignEndAt ? ist(campaign.campaignEndAt) : "-"],
     ["Duration", `${campaign.durationMinutes} min`], ["Amount paid", `INR ${campaign.pricingBreakdown.total}`],
-    ["Razorpay payment ID", campaign.razorpayPaymentId],
+    ["Payment", campaign.paymentMethod === "wallet" ? "Wallet" : `Razorpay ${campaign.razorpayPaymentId}`],
   ];
   await sendMail({
     to: process.env.CEO_NOTIFY_EMAIL || "ceo@socialbureau.in",
@@ -165,7 +264,12 @@ exports.webhook = async (req, res) => {
     const payment = event.payload && event.payload.payment && event.payload.payment.entity;
     if (!payment || !["payment.captured", "order.paid", "payment.failed"].includes(event.event)) return res.json({ received: true });
     const campaign = await Campaign.findOne({ razorpayOrderId: payment.order_id }).select("+accessTokenHash");
-    if (!campaign) return res.json({ received: true });
+    if (!campaign) {
+      if (["payment.captured", "order.paid"].includes(event.event) && payment.status === "captured" && payment.currency === "INR") {
+        await creditTopup(payment.order_id, payment);
+      }
+      return res.json({ received: true });
+    }
     const claimedCampaign = await Campaign.findOneAndUpdate(
       { _id: campaign._id, processedWebhookEventIds: { $ne: eventId } },
       { $addToSet: { processedWebhookEventIds: eventId } },
@@ -175,7 +279,7 @@ exports.webhook = async (req, res) => {
     if (event.event === "payment.failed") {
       await Campaign.updateOne({ _id: claimedCampaign._id, paymentStatus: { $ne: "paid" } }, { $set: { paymentStatus: "failed" } });
     } else if (payment.status === "captured" && payment.amount === claimedCampaign.pricingBreakdown.totalPaise && payment.currency === "INR") {
-      await markPaid(claimedCampaign, payment.id);
+      if (!(await creditDuplicatePayment(claimedCampaign, payment))) await markPaid(claimedCampaign, payment.id);
     }
     return res.json({ received: true });
   } catch (error) {
