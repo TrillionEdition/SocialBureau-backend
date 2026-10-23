@@ -45,6 +45,7 @@ const resumeMarketplaceRoutes = require("./resumeMarketplaceRoutes");
 const campaignRoutes = require("./campaignRoutes");
 const invoiceRoutes = require("./invoiceRoutes");
 const supportRoutes = require("./supportRoutes");
+const digitalCardLeadRoutes = require("./digitalCardLeadRoutes");
 
 const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
 const dynamicReportRoutes = require("../modules/dynamicReports/dynamicReportRoutes");
@@ -78,6 +79,7 @@ router.use("/payment", paymentRoutes);
 router.use('/ats', atsRoutes);
 router.use('/resume', resumeRoutes);
 router.use("/api-leads", apiLeadRoutes);
+router.use("/api/digital-card/leads", digitalCardLeadRoutes);
 router.use("/media-waitlist", mediaWaitlistRoutes);
 router.use("/ajnora", ajnoraRouters);
 // Disabled lottery endpoints to avoid exposing prize/claim APIs
