@@ -3,6 +3,7 @@ const blogController = require('../controllers/blogController');
 const upload = require('../middlewares/cloudflare');
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
+const optionalAuthentication = require("../middlewares/optionalAuthentication");
 
 const blogRoutes = express.Router();
 
@@ -38,7 +39,7 @@ blogRoutes.get('/latest', blogController.getLatestBlogs);
 blogRoutes.get('/redirect/:slug', blogController.getBlogRedirect);
 
 // Get all blogs (with filtering)
-blogRoutes.get('/', blogController.getBlogs);
+blogRoutes.get('/', optionalAuthentication, blogController.getBlogs);
 
 // ========================================
 // ✅ NESTED ROUTES - MUST come BEFORE :slug
@@ -61,7 +62,7 @@ blogRoutes.delete('/:slug/comments/:commentId', userAuthentication, blogControll
 // ========================================
 
 // Get single blog by slug
-blogRoutes.get('/:slug', blogController.getBlogBySlug);
+blogRoutes.get('/:slug', optionalAuthentication, blogController.getBlogBySlug);
 
 // Update blog
 blogRoutes.put('/:slug', userAuthentication, upload.fields([

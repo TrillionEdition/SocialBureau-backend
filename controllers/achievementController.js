@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Achievement = require("../models/achievementModel");
 const User = require("../models/userModel");
+const safeUserDetails = require("../utils/safeUserDetails");
 const { getCache, setCache, invalidateCache, CACHE_EXPIRY } = require("../utils/Cacheutils");
 
 // Add a new achievement
@@ -203,12 +204,17 @@ const getUserDetails = async (req, res) => {
 
         const cachedData = await getCache(cacheKey);
         if (cachedData) {
-            return res.status(200).json(cachedData);
+            return res.status(200).json({
+                ...cachedData,
+                user: safeUserDetails(cachedData.user),
+            });
         }
 
+        const normalizedName = name.trim();
         const user = await User.findOne({
-            name: { $regex: new RegExp(`^${name.trim()}$`, "i") }
+            name: { $regex: new RegExp(`^${escapeRegExp(normalizedName)}$`, "i") }
         })
+            .select("name email role verification isEmployee exp doj title bio location avatar coverImage achievements reviews clients tools")
             .populate({
                 path: 'achievements',
                 select: 'title description image createdAt'
@@ -251,7 +257,7 @@ const getUserDetails = async (req, res) => {
 
         const responseData = {
             success: true,
-            user,
+            user: safeUserDetails(user),
             clickup: clickupData
         };
 
@@ -273,3 +279,7 @@ module.exports = {
     deleteAchievement,
     getUserDetails
 };
+
+function escapeRegExp(value) {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

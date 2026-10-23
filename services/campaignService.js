@@ -80,9 +80,10 @@ function calculateCampaignPrice(requestedViews, durationMinutes, campaignType, r
     throw new Error("Invalid campaign type, views or duration");
   }
 
+  const pricePer1000ViewsPerHour = validatedRates[campaignType];
   const basePaise = resolved.basePrice !== null
     ? roundPaise(resolved.basePrice * 100)
-    : roundPaise(CAMPAIGN_PLANS.C.ratePer1000ViewsPerHour * 100 * (resolved.requestedViews / 1000) * resolved.durationMinutes / 60);
+    : roundPaise(pricePer1000ViewsPerHour * 100 * (resolved.requestedViews / 1000) * resolved.durationMinutes / 60);
   const gstPaise = roundPaise(basePaise * CAMPAIGN_PRICING.gstRate / 100);
   const subtotalPaise = basePaise + gstPaise;
   const processingFeePaise = roundPaise(subtotalPaise * CAMPAIGN_PRICING.razorpayFeeRate / 100);
@@ -98,8 +99,6 @@ function calculateCampaignPrice(requestedViews, durationMinutes, campaignType, r
     total: totalPaise / 100,
     totalPaise,
     currency: "INR",
-    plan: resolved.plan,
-    billing: resolved.billing,
   };
 }
 
@@ -165,8 +164,9 @@ function validateCampaignBooking(input, now = Date.now(), rates = DEFAULT_CAMPAI
   if (!Number.isInteger(requestedViews) || requestedViews < CAMPAIGN_PRICING.minViews) {
     throw new Error(`Requested views must be at least ${CAMPAIGN_PRICING.minViews}`);
   }
-  if (requestedViews > CAMPAIGN_PRICING.maxViews) {
-    throw new Error(`Requested views cannot exceed ${CAMPAIGN_PRICING.maxViews.toLocaleString("en-IN")}`);
+  const maxViews = CAMPAIGN_PRICING[input.campaignType]?.maxViews ?? CAMPAIGN_PRICING.maxViews;
+  if (requestedViews > maxViews) {
+    throw new Error(`custom rate required for ${input.campaignType} bookings above ${maxViews.toLocaleString("en-IN")} views`);
   }
   const pricingBreakdown = calculateCampaignPrice(requestedViews, durationMinutes, input.campaignType, rates, input);
   return { startAt, endAt: calculateCampaignEndAt(startAt, durationMinutes, resolved.days), durationMinutes, requestedViews, pricingBreakdown, plan: resolved.plan, billing: resolved.billing };

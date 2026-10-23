@@ -18,6 +18,6 @@ achievementRouter.put("/:achievementId", userAuthentication, isAdmin, updateAchi
 achievementRouter.delete("/:achievementId", userAuthentication, isAdmin, deleteAchievement);
 
 // Get user details (this is what your frontend calls)
-achievementRouter.get("/user-details/:name", getUserDetails);
+achievementRouter.get("/user-details/:name", userAuthentication, isAdmin, getUserDetails);
 
 module.exports = achievementRouter;

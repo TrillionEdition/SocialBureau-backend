@@ -3,7 +3,7 @@ const userController = require("../controllers/userController")
 const upload = require("../middlewares/cloudflare")
 const userAuthentication = require("../middlewares/userAuthentication");
 const isAdmin = require("../middlewares/isAdmin");
-const { loginLimiter } = require("../middlewares/rateLimiter");
+const { loginLimiter, passwordResetLimiter, otpVerificationLimiter } = require("../middlewares/rateLimiter");
 const userRouter = express.Router()
 
 userRouter.post('/register', loginLimiter, upload.fields([
@@ -16,8 +16,8 @@ userRouter.post("/google-login", loginLimiter, userController.googleLogin)
 userRouter.get('/logout', userController.logout)
 userRouter.get('/team', userController.getUsers)
 userRouter.get('/admin/team', userAuthentication, isAdmin, userController.getAdminUsers)
-userRouter.put('/tools', userController.updateTool)
-userRouter.put('/clients', userController.updateClient)
+userRouter.put('/tools', userAuthentication, isAdmin, userController.updateTool)
+userRouter.put('/clients', userAuthentication, isAdmin, userController.updateClient)
 userRouter.get('/leaderboard', userController.getLeaderboard);
 userRouter.get('/health-check', (req, res) => {
     res.json({
@@ -27,9 +27,9 @@ userRouter.get('/health-check', (req, res) => {
         env: process.env.NODE_ENV || "development"
     });
 });
-userRouter.post("/forgot-password", userController.forgotPassword);
-userRouter.post("/verify-otp", userController.verifyResetOTP);
-userRouter.post("/reset-password", userController.resetPassword);
+userRouter.post("/forgot-password", passwordResetLimiter, userController.forgotPassword);
+userRouter.post("/verify-otp", passwordResetLimiter, otpVerificationLimiter, userController.verifyResetOTP);
+userRouter.post("/reset-password", passwordResetLimiter, userController.resetPassword);
 userRouter.post("/logout", userAuthentication, userController.logout)
 
 // Specific user routes (must come after static routes like /team, /leaderboard to avoid conflicts if IDs are not validated)
@@ -43,4 +43,3 @@ userRouter.put('/:id', userAuthentication, upload.fields([
 userRouter.delete('/:id', userAuthentication, isAdmin, userController.deleteUser);
 
 module.exports = userRouter
-

@@ -4,10 +4,10 @@
  */
 const adminAuthentication = (req, res, next) => {
   const role = req.user && req.user.role ? req.user.role.toLowerCase() : null;
-  if (role === "admin" || role === "partner" || role === "partnership") {
+  if (role === "admin") {
     return next();
   }
-  return res.status(403).json({ message: "Access denied. Admin or Partner role required." });
+  return res.status(403).json({ message: "Access denied. Admin role required." });
 };
 
 module.exports = adminAuthentication;

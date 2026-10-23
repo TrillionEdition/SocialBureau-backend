@@ -1,9 +1,15 @@
 const multer = require("multer");
 
-// 50 MB per file — files never touch disk.
+const MAX_UPLOAD_FILES = 5;
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+    files: MAX_UPLOAD_FILES,
+    fields: 10,
+    parts: 15,
+  },
 });
 
 /** Parse `1-3,5,7-9` into a 0-indexed list of pages, clamped to `total`. */
@@ -41,4 +47,4 @@ function sendBuffer(res, buffer, filename, mediaType) {
   res.send(buffer);
 }
 
-module.exports = { upload, parsePageRanges, sendBuffer };
+module.exports = { upload, MAX_UPLOAD_FILES, parsePageRanges, sendBuffer };

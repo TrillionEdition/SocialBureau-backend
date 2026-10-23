@@ -51,6 +51,7 @@ const auditReportRoutes = require("../modules/auditReports/auditReportRoutes");
 const dynamicReportRoutes = require("../modules/dynamicReports/dynamicReportRoutes");
 
 const router = express.Router();
+const { aiLimiter } = require("../middlewares/rateLimiter");
 
 router.use(express.json());
 
@@ -92,7 +93,7 @@ router.use("/workflow", workflowRoutes);
 // Disabled fifa endpoints to avoid exposing prediction/match APIs
 // router.use("/fifa", fifaRoutes);
 router.use("/api/forms", formsRoutes);
-router.use("/api/ai", aiProxy);
+router.use("/api/ai", aiLimiter, aiProxy);
 router.use("/api/pdf", pdfRoutes);
 router.use("/api/image", imageRoutes);
 router.use("/api/audit-reports", auditReportRoutes);

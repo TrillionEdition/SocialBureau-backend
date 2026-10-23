@@ -50,7 +50,7 @@ jobRoutes.delete("/:id", userAuthentication, isAdmin, deleteJob);
 jobRoutes.patch("/:id/toggle", userAuthentication, isAdmin, toggleJobStatus);
 
 // DEBUG ENDPOINT - Get all jobs (active and inactive) for troubleshooting
-jobRoutes.get("/debug/all", async (req, res) => {
+jobRoutes.get("/debug/all", userAuthentication, isAdmin, async (req, res) => {
   try {
     const jobs = await Job.find().select("_id slug title isActive createdAt").sort({ createdAt: -1 });
     const activeCount = jobs.filter(j => j.isActive).length;

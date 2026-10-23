@@ -81,12 +81,14 @@ async function convertWithLibreOffice(fileBuffer, inputExt, outputExt, inFilter 
   }
 }
 
-const { upload, parsePageRanges, sendBuffer } = require("../utils/multerUtils");
+const { upload, MAX_UPLOAD_FILES, parsePageRanges, sendBuffer } = require("../utils/multerUtils");
+const { pdfLimiter } = require("../middlewares/rateLimiter");
 
 const router = express.Router();
+router.use(pdfLimiter);
 
 // ─── MERGE ────────────────────────────────────────────────────────────────
-router.post("/merge", upload.array("files"), async (req, res, next) => {
+router.post("/merge", upload.array("files", MAX_UPLOAD_FILES), async (req, res, next) => {
   try {
     if (!req.files || req.files.length < 2) {
       return res.status(400).json({ message: "Upload at least 2 PDFs to merge" });
@@ -184,7 +186,7 @@ router.post("/to-text", upload.single("file"), async (req, res, next) => {
 });
 
 // ─── IMAGES → PDF ─────────────────────────────────────────────────────────
-router.post("/from-images", upload.array("files"), async (req, res, next) => {
+router.post("/from-images", upload.array("files", MAX_UPLOAD_FILES), async (req, res, next) => {
   try {
     if (!req.files || !req.files.length) {
       return res.status(400).json({ message: "Upload at least 1 image" });

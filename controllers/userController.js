@@ -18,6 +18,7 @@ const { storeVerificationCode, getVerificationCode, removeVerificationCode } = r
 const { default: axios } = require("axios");
 const { OAuth2Client } = require("google-auth-library");
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const registrationRole = require("../utils/registrationRole");
 
 // helper to get upload URL from multer/cloudinary file object
 function getUrlFromFile(f) {
@@ -28,7 +29,6 @@ const userController = {
 
   register: asyncHandler(async (req, res) => {
     const { clickupId, clickupListId, clickupChatViewId, clickupToken, email, name, password, role, emp_id, doj, rate, phone, isEmployee, captchaToken } = req.body;
-    console.log(" Register attempt with email:", email);
 
     // Skip captcha for authenticated admin users (e.g. admin creating clients from dashboard)
     let isAdminRequest = false;
@@ -49,7 +49,7 @@ const userController = {
       // Token invalid or missing — not an admin request, captcha required
     }
 
-    const assignedRole = !isAdminRequest && String(role || "").toLowerCase() === "admin" ? "partnership" : role;
+    const assignedRole = registrationRole(role, isAdminRequest);
 
     // Verify Cloudflare Turnstile Captcha (skip for admin users)
     if (process.env.CAPTCHA_SECRET_KEY && !isAdminRequest) {
@@ -78,7 +78,7 @@ const userController = {
     }
 
     const sanitizedClickupId = isAdminRequest && clickupId && String(clickupId).trim() ? String(clickupId).trim() : undefined;
-    const sanitizedRate = (rate && String(rate).trim()) ? Number(rate) : undefined;
+    const sanitizedRate = isAdminRequest && rate && String(rate).trim() ? Number(rate) : undefined;
 
     if (email) {
       const emailNormalized = email.toLowerCase().trim();
@@ -90,8 +90,6 @@ const userController = {
         email: emailNormalized,
       });
 
-      console.log("Email check result:", emailExists);
-
       if (emailExists) {
         res.status(400);
         throw new Error("Email already exists");
@@ -100,15 +98,12 @@ const userController = {
 
 
 
-    let toolsInput = req.body.tools;
-    console.log("Raw tools from req.body:", toolsInput, typeof toolsInput);
+    let toolsInput = isAdminRequest ? req.body.tools : [];
 
     if (typeof toolsInput === 'string') {
       try {
         toolsInput = JSON.parse(toolsInput);
-        console.log("Parsed tools:", toolsInput);
       } catch (err) {
-        console.error("Failed to parse tools JSON:", err.message);
         toolsInput = [];
       }
     }
@@ -117,10 +112,9 @@ const userController = {
       toolsInput = toolsInput ? [toolsInput] : [];
     }
 
-    console.log("Final toolsInput after parsing:", toolsInput);
 
     // Handle Clients Input parsing
-    let clientsInput = req.body.clients;
+    let clientsInput = isAdminRequest ? req.body.clients : [];
     if (typeof clientsInput === 'string') {
       try {
         clientsInput = JSON.parse(clientsInput);
@@ -137,7 +131,7 @@ const userController = {
     const idCardFile = req.files?.idCard?.[0];
 
     const coverImageUrl = getUrlFromFile(coverFile);
-    const idCardUrl = getUrlFromFile(idCardFile);
+    const idCardUrl = isAdminRequest ? getUrlFromFile(idCardFile) : null;
 
     const normalizeTool = (t) => {
       if (!t || typeof t !== "object") return null;
@@ -158,7 +152,6 @@ const userController = {
       .map(normalizeTool)
       .filter(Boolean);
 
-    console.log("Normalized tools:", normalized);
 
     const seen = new Set();
     const dedupedTools = [];
@@ -290,8 +283,8 @@ const userController = {
       role: assignedRole,
       isEmployee: isAdminRequest ? isEmployee : false,
       name,
-      emp_id,
-      doj,
+      emp_id: isAdminRequest ? emp_id : undefined,
+      doj: isAdminRequest ? doj : undefined,
       password: hashed_password,
       coverImage: coverImageUrl,
       idCard: idCardUrl,
@@ -350,7 +343,7 @@ const userController = {
       throw new Error('User creation failed');
     }
 
-    console.log("User created with tools:", userCreated);
+    console.info("User registered", { userId: String(userCreated._id) });
 
     const payload = {
       email: userCreated.email,
@@ -414,10 +407,11 @@ const userController = {
     let userExist = null;
     if (typeof email === "string" && email.trim()) {
       userExist = await User.findOne({ email: email.trim() })
+        .select("+password")
         .collation({ locale: "en", strength: 2 });
     }
     if (!userExist && clickupId) {
-      userExist = await User.findOne({ clickupId });
+      userExist = await User.findOne({ clickupId }).select("+password");
     }
 
     if (!userExist) {
@@ -456,8 +450,7 @@ const userController = {
       verification: !!userExist.verification,
     };
 
-    const secret = process.env.JWT_SECRET_KEY || "SocialBureau";
-    const token = jwt.sign(payload, secret, {
+    const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
       expiresIn: "1d",
     });
 
@@ -496,7 +489,7 @@ const userController = {
   }),
 
   googleLogin: asyncHandler(async (req, res) => {
-    const { idToken, role } = req.body;
+    const { idToken } = req.body;
 
     if (!idToken) {
       res.status(400);
@@ -551,7 +544,7 @@ const userController = {
         name: name || email.split("@")[0],
         password: hashed_password,
         avatar: picture,
-        role: role || "user", // Default role
+        role: "user",
         verification: true, // Google accounts are verified
       });
 
@@ -602,8 +595,7 @@ const userController = {
       verification: !!user.verification,
     };
 
-    const secret = process.env.JWT_SECRET_KEY || "SocialBureau";
-    const token = jwt.sign(jwtPayload, secret, {
+    const token = jwt.sign(jwtPayload, process.env.JWT_SECRET_KEY, {
       expiresIn: "1d",
     });
 

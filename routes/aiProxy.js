@@ -7,6 +7,13 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent`;
 
+router.use((req, res, next) => {
+  if (Buffer.byteLength(JSON.stringify(req.body || {}), "utf8") > 20000) {
+    return res.status(413).json({ error: "AI request is too large." });
+  }
+  return next();
+});
+
 // ── POST /api/ai/claude ────────────────────────────────────────────────────────
 // Accepts the same body shape the frontend already sends (Anthropic format)
 // and translates it to Gemini format internally.
@@ -15,10 +22,13 @@ router.post("/claude", async (req, res) => {
     return res.status(500).json({ error: "GEMINI_API_KEY is not configured on the server." });
   }
 
-  const { messages, max_tokens = 1000 } = req.body;
+  const { messages, max_tokens = 1000 } = req.body || {};
 
-  if (!messages || !Array.isArray(messages)) {
-    return res.status(400).json({ error: "messages array is required." });
+  if (!Array.isArray(messages) || messages.length === 0 || messages.length > 20) {
+    return res.status(400).json({ error: "messages must contain between 1 and 20 items." });
+  }
+  if (!Number.isInteger(Number(max_tokens)) || Number(max_tokens) < 1 || Number(max_tokens) > 2048) {
+    return res.status(400).json({ error: "max_tokens must be between 1 and 2048." });
   }
 
   // Translate Anthropic message format → Gemini format
@@ -30,7 +40,7 @@ router.post("/claude", async (req, res) => {
   const geminiBody = {
     contents: geminiContents,
     generationConfig: {
-      maxOutputTokens: max_tokens,
+      maxOutputTokens: Number(max_tokens),
       temperature: 0.7,
     },
   };
@@ -68,7 +78,7 @@ router.post("/claude", async (req, res) => {
 router.post("/image", async (req, res, next) => {
   try {
     const { prompt, style } = req.body || {};
-    if (!prompt || !prompt.trim()) {
+    if (typeof prompt !== "string" || !prompt.trim() || prompt.length > 4000) {
       return res.status(400).json({ message: "prompt required" });
     }
     if (!GEMINI_KEY) {
@@ -165,7 +175,7 @@ router.post("/prompt", async (req, res, next) => {
       tone = "technical",
     } = req.body || {};
 
-    if (!topic || !topic.trim()) {
+    if (typeof topic !== "string" || !topic.trim() || topic.length > 2000) {
       return res.status(400).json({ message: "topic required" });
     }
 
@@ -248,7 +258,7 @@ router.post("/content-generator", async (req, res, next) => {
       platform = "generic", // for caption
     } = req.body || {};
 
-    if (!topic || !topic.trim()) {
+    if (typeof topic !== "string" || !topic.trim() || topic.length > 2000) {
       return res.status(400).json({ message: "topic is required" });
     }
 

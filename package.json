@@ -3,10 +3,13 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node --test middlewares/adminAuthentication.test.js services/campaignService.test.js services/youtubeAnalyticsService.test.js services/youtubePrivateAnalyticsService.test.js services/invoiceService.test.js utils/campaignPayment.test.js utils/digitalCardLeadUtils.test.js",
+    "test": "node --test config/securityConfig.test.js middlewares/adminAuthentication.test.js routes/securityAuthorization.test.js services/campaignService.test.js services/youtubeAnalyticsService.test.js services/youtubePrivateAnalyticsService.test.js services/invoiceService.test.js utils/campaignPayment.test.js utils/clickupRequestSecurity.test.js utils/currentUserRole.test.js utils/digitalCardLeadUtils.test.js utils/pagePaymentSecurity.test.js utils/partnershipEntitlements.test.js utils/paymentSecurity.test.js utils/protectedPageContent.test.js utils/registrationRole.test.js utils/safeUserDetails.test.js utils/sanitizeBlogContent.test.js",
     "start": "node index.js",
-    "dev": "nodemon index.js",
+    "dev": "node --watch index.js",
     "generate-sitemaps": "node scripts/generateSitemaps.js"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   },
   "keywords": [],
   "author": "",
@@ -45,11 +48,10 @@
     "multer": "^2.0.2",
     "natural": "^8.1.0",
     "node-cron": "^4.2.1",
-    "nodemailer": "^6.9.13",
-    "nodemon": "^3.1.10",
+    "nodemailer": "^10.2.1",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^1.1.1",
-    "pdf-to-img": "^6.2.0",
+    "pdf-to-img": "^7.0.1",
     "razorpay": "^2.9.6",
     "redis": "^5.11.0",
     "sanitize-html": "^2.18.0",

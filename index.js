@@ -1,4 +1,9 @@
 require("dotenv").config();
+for (const secretName of ["JWT_SECRET_KEY", "SESSION_SECRET"]) {
+  if (!process.env[secretName]) {
+    throw new Error(`${secretName} must be configured before starting the backend`);
+  }
+}
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./database/connectDB");
@@ -10,16 +15,8 @@ const helmet = require("helmet");
 const path = require("path");
 const MongoStore = require("connect-mongo").default || require("connect-mongo");
 const { apiLimiter } = require("./middlewares/rateLimiter");
+const { allowedOrigins, isAllowedOrigin } = require("./config/securityConfig");
 const app = express();
-
-const allowedOrigins = [
-  "https://www.socialbureau.in",
-  "https://socialbureau.in",
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5174",
-];
 
 // ================== MIDDLEWARE ==================
 app.use(helmet({
@@ -59,7 +56,7 @@ app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (e.g. mobile apps, curl)
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (isAllowedOrigin(origin)) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -105,7 +102,7 @@ app.use(
       collectionName: "sessions",
       ttl: 14 * 24 * 60 * 60, // 14 days, adjust as needed
     }),
-    secret: process.env.SESSION_SECRET || "fallback-secret-key-change-in-production",
+    secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
