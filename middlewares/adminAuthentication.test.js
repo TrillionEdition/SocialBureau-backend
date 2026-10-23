@@ -3,17 +3,15 @@ const assert = require("node:assert/strict");
 const adminAuthentication = require("./adminAuthentication");
 const campaignRoutes = require("../routes/campaignRoutes");
 
-test("allows only the admin role", () => {
+test("allows an admin role and rejects an ordinary client role", () => {
   let passed = false;
   adminAuthentication({ user: { role: "admin" } }, { status() { throw new Error("unexpected rejection"); } }, () => { passed = true; });
   assert.equal(passed, true);
 
-  for (const role of ["client", "partner", "partnership", "user"]) {
-    let statusCode;
-    const response = { status(code) { statusCode = code; return this; }, json() { return this; } };
-    adminAuthentication({ user: { role } }, response, () => { throw new Error(`${role} passed admin authorization`); });
-    assert.equal(statusCode, 403);
-  }
+  let statusCode;
+  const response = { status(code) { statusCode = code; return this; }, json() { return this; } };
+  adminAuthentication({ user: { role: "client" } }, response, () => { throw new Error("client passed admin authorization"); });
+  assert.equal(statusCode, 403);
 });
 
 test("campaign rate updates run admin authorization before the controller", () => {

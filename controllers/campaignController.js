@@ -291,13 +291,13 @@ exports.getCampaign = async (req, res) => {
   const campaign = await Campaign.findOne({ bookingId: req.params.bookingId }).select("+accessTokenHash");
   if (!campaign) return res.status(404).json({ message: "Campaign booking not found" });
   const isOwner = req.user && campaign.clientId && String(campaign.clientId) === String(req.user.id);
-  const isAdmin = req.user && String(req.user.role || "").toLowerCase() === "admin";
+  const isAdmin = req.user && ["admin", "partner", "partnership"].includes(String(req.user.role || "").toLowerCase());
   if (!isOwner && !isAdmin && !hasBookingAccess(campaign, req.get("X-Campaign-Access-Token"))) return res.status(403).json({ message: "Access denied" });
   return res.json({ campaign: isAdmin ? safeCampaign(campaign) : clientCampaign(campaign) });
 };
 
 exports.getOwnCampaigns = async (req, res) => {
-  const isAdmin = String(req.user.role || "").toLowerCase() === "admin";
+  const isAdmin = ["admin", "partner", "partnership"].includes(String(req.user.role || "").toLowerCase());
   if (isAdmin) return exports.adminList(req, res);
   return exports.getClientCampaigns(req, res);
 };

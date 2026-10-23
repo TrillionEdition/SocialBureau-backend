@@ -11,7 +11,6 @@ const crypto = require('crypto');
 
 const { AsyncLocalStorage } = require('async_hooks');
 const clickupStorage = new AsyncLocalStorage();
-const { isClickUpApiUrl } = require("../utils/clickupRequestSecurity");
 
 const CLICKUP_TOKEN = process.env.CLICKUP_API_TOKEN || process.env.CLICKUP_TOKEN;
 const TEAM_ID = "9014733918";
@@ -62,12 +61,11 @@ const getCachedClickUp = async (url, token) => {
 // Axios request interceptor to dynamically set authorization token
 axios.interceptors.request.use((config) => {
   const store = clickupStorage.getStore();
-  if (store && store.clickupToken && isClickUpApiUrl(config.url, config.baseURL)) {
+  if (store && store.clickupToken && config.url && config.url.includes('api.clickup.com')) {
     const hasAuthHeader = config.headers && (config.headers.Authorization || config.headers.authorization);
     if (!hasAuthHeader) {
       config.headers = Object.assign({}, config.headers || {}, { Authorization: store.clickupToken });
     }
-    config.maxRedirects = 0;
   }
   return config;
 }, (error) => {
@@ -148,7 +146,7 @@ const getOrCreateHostTask = async (listId, token) => {
 
     return createRes.data.id;
   } catch (error) {
-    console.error("ClickUp host-task request failed", { status: error.response?.status, code: error.code });
+    console.error("❌ Error in getOrCreateHostTask:", error.response?.data || error.message);
     // Fallback: just return the first task ID if any
     try {
       const fallbackUrl = `https://api.clickup.com/api/v2/list/${listId}/task`;
@@ -225,7 +223,7 @@ const clickupController = {
         task: mappedTask
       });
     } catch (error) {
-      console.error("ClickUp task request failed", { status: error.response?.status, code: error.code });
+      console.error("❌ ClickUp API Error (getTaskById):", error.response?.data || error.message);
       res.status(502).json({ success: false, message: "ClickUp request failed" });
     }
   }),
@@ -361,7 +359,7 @@ const clickupController = {
           });
           console.log("✅ File upload using custom token successful!");
         } catch (err) {
-          console.error("ClickUp attachment upload failed with custom token", { status: err.response?.status, code: err.code });
+          console.error("❌ Custom token upload failed:", err.response?.data || err.message);
           if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
           return res.status(err.response?.status || 500).json({
             success: false,
@@ -378,7 +376,7 @@ const clickupController = {
             },
           });
         } catch (err) {
-          console.error("ClickUp attachment upload failed", { status: err.response?.status, code: err.code });
+          console.error("❌ Global token upload failed:", err.response?.data || err.message);
           if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
           return res.status(err.response?.status || 500).json({
             success: false,
@@ -387,6 +385,7 @@ const clickupController = {
         }
       }
 
+      console.log("✅ ClickUp Upload Success:", response.data);
 
       // Cleanup local temp file
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
@@ -484,7 +483,7 @@ const clickupController = {
             });
             console.log("✅ Auto-posted rich attachment comment successfully using custom token!");
           } catch (err) {
-            console.error("ClickUp attachment comment failed with custom token", { status: err.response?.status, code: err.code });
+            console.error("❌ Custom token auto-post failed:", err.response?.data || err.message);
             return res.status(err.response?.status || 500).json({
               success: false,
               message: "Failed to post attachment comment"
@@ -505,15 +504,17 @@ const clickupController = {
           console.log("✅ Auto-posted rich attachment comment successfully using global token!");
         }
       } catch (commentErr) {
-        console.error("ClickUp attachment comment failed", { status: commentErr.response?.status, code: commentErr.code });
+        console.error("⚠️ Failed to auto-post rich attachment comment:", commentErr.response?.data || commentErr.message);
         // Only propagate if custom token is used and it failed outside the nested catch
         if (hasCustomToken) throw commentErr;
       }
 
       res.json({ success: true });
     } catch (error) {
+      const errorData = error.response?.data;
       const status = error.response?.status;
-      console.error("ClickUp attachment upload failed", { status, code: error.code });
+      
+      console.error(`❌ ClickUp API Error (uploadAttachment) [Status ${status}]:`, JSON.stringify(errorData, null, 2) || error.message);
       
       // Try to cleanup even on error
       if (req.file && fs.existsSync(req.file.path)) {
@@ -582,7 +583,7 @@ const clickupController = {
         worksDone,
       });
     } catch (e) {
-      console.error("ClickUp time-entry request failed", { status: e.response?.status, code: e.code });
+      console.error("❌ ClickUp Time Fetch Error:", e.response?.data || e.message);
       res.status(500).json({ error: e.message });
     }
   }),
@@ -628,13 +629,13 @@ const clickupController = {
         }
       });
     } catch (error) {
-      console.error("ClickUp diagnostic request failed", { status: error.response?.status, code: error.code });
+      console.error("❌ Test Error:", error.response?.data || error.message);
       const config = await getUserConfig(req.user.id).catch(() => ({}));
       const activeToken = config.clickupToken || CLICKUP_TOKEN;
       const activeListId = config.listId || LIST_ID;
       res.status(500).json({
         success: false,
-        error: "ClickUp request failed",
+        error: error.response?.data || error.message,
         config: {
           token: activeToken ? "✓ Present" : "✗ Missing",
           listId: activeListId,
@@ -740,8 +741,8 @@ const clickupController = {
 
       res.json({ success: true, message: 'ClickUp account connected', clickupUserId });
     } catch (err) {
-      console.error("ClickUp OAuth callback failed", { status: err.response?.status, code: err.code });
-      res.status(500).json({ success: false, error: "ClickUp OAuth failed" });
+      console.error('❌ OAuth callback error:', err.response?.data || err.message || err);
+      res.status(500).json({ success: false, error: err.response?.data || err.message });
     }
   }),
 
@@ -894,7 +895,7 @@ const clickupController = {
       });
 
     } catch (e) {
-      console.error("ClickUp task-list request failed", { status: e.response?.status, code: e.code });
+      console.error("❌ ClickUp Fetch Error:", e.response?.data || e.message);
       res.status(500).json({ success: false, error: e.message });
     }
   }),
@@ -1059,7 +1060,7 @@ const clickupController = {
 
 
     } catch (e) {
-      console.error("ClickUp activity request failed", { status: e.response?.status, code: e.code });
+      console.error("❌ ClickUp Activity Fetch Error:", e.response?.data || e.message);
       res.status(500).json({ success: false, error: e.message });
     }
   }),
@@ -1235,7 +1236,6 @@ const clickupController = {
       const member = await TeamMember.findOne({ slug })
         .populate({
           path: "user",
-          select: "+clickupToken",
           populate: [
             {
               path: "tools",
@@ -2342,14 +2342,17 @@ const clickupController = {
       // Assign to team member (optional - remove if causing issues)
       taskPayload.assignees = [88409188];
 
+      console.log("📋 Final Payload:", JSON.stringify(taskPayload, null, 2));
 
       const config = await getUserConfig(req.user.id);
       const userListId = config.listId;
       if (!userListId) return res.status(403).json({ success: false, message: "No ClickUp list is configured for this account" });
 
       const url = `https://api.clickup.com/api/v2/list/${userListId}/task`;
+      console.log("📋 POST URL:", url);
 
       const activeToken = config.clickupToken || CLICKUP_TOKEN;
+      console.log("📋 Authorization Header Length:", activeToken?.length);
 
       const response = await axios.post(url, taskPayload, {
         headers: {
@@ -2360,6 +2363,8 @@ const clickupController = {
       });
 
       console.log("✅ Task Created!");
+      console.log("✅ Task ID:", response.data.id);
+      console.log("✅ Task URL:", response.data.url);
       console.log("📋 ============ SUCCESS ============\n");
 
       return res.json({
@@ -2370,6 +2375,8 @@ const clickupController = {
     } catch (error) {
       console.error("\n❌ ============ ERROR ============");
       console.error("❌ Status:", error.response?.status);
+      console.error("❌ Status Text:", error.response?.statusText);
+      console.error("❌ Message:", error.message);
       console.error("📋 ============ END ERROR ============\n");
 
       return res.status(error.response?.status || 500).json({
@@ -2451,7 +2458,7 @@ const clickupController = {
         })
       });
     } catch (error) {
-      console.error("ClickUp chat-comment request failed", { status: error.response?.status, code: error.code });
+      console.error("❌ ClickUp API Error (getChatComments):", error.response?.data || error.message);
       res.status(502).json({ success: false, comments: [], message: "ClickUp request failed" });
     }
   }),
@@ -2498,7 +2505,7 @@ const clickupController = {
           });
           return res.json({ success: true });
         } catch (err) {
-          console.error("ClickUp comment post failed with custom token", { status: err.response?.status, code: err.code });
+          console.error("❌ Custom token comment post failed:", err.response?.data || err.message);
           return res.status(err.response?.status || 502).json({
             success: false,
             message: "Failed to post comment"
@@ -2521,7 +2528,7 @@ const clickupController = {
 
       res.json({ success: true });
     } catch (err) {
-      console.error("ClickUp comment post failed", { status: err.response?.status, code: err.code });
+      console.error("❌ postChatComment error:", err.response?.data || err.message);
       res.status(502).json({
         success: false,
         message: "Failed to post comment to ClickUp"
@@ -2743,7 +2750,7 @@ const clickupController = {
           }
         });
       } catch (actError) {
-        console.error("ClickUp team activity request failed", { status: actError.response?.status, code: actError.code });
+        console.error("⚠️ Team Activity API Failed:", actError.response?.data || actError.message);
       }
 
 
@@ -2758,7 +2765,7 @@ const clickupController = {
         activity: finalActivity
       });
     } catch (e) {
-      console.error("ClickUp activity request failed", { status: e.response?.status, code: e.code });
+      console.error("❌ Fatal Activity Error:", e.response?.data || e.message);
       res.status(500).json({ success: false, error: e.message });
     }
   })

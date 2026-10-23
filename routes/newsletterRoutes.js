@@ -18,8 +18,6 @@
 // routes/newsLetterRoutes.js
 const express = require("express");
 const newsletterRoutes = express.Router();
-const userAuthentication = require("../middlewares/userAuthentication");
-const isAdmin = require("../middlewares/isAdmin");
 
 const {
   subscribeNewsletter,
@@ -31,7 +29,8 @@ const {
 newsletterRoutes.post("/subscribe", subscribeNewsletter);
 newsletterRoutes.post("/unsubscribe", unsubscribeNewsletter);
 
-newsletterRoutes.post("/send-test", userAuthentication, isAdmin, sendTestNewsletter);
-newsletterRoutes.get("/stats", userAuthentication, isAdmin, getSubscriberCount);
+// Admin/Testing routes (add auth middleware if needed)
+newsletterRoutes.post("/send-test", sendTestNewsletter);
+newsletterRoutes.get("/stats", getSubscriberCount);
 
 module.exports = newsletterRoutes;

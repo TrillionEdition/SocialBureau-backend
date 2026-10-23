@@ -2,8 +2,6 @@ const express = require("express");
 const router = express.Router();
 const intake = require("../models/intake");
 const upload = require("../middlewares/cloudflare");
-const userAuthentication = require("../middlewares/userAuthentication");
-const isAdmin = require("../middlewares/isAdmin");
 
 // Accept files (any field name) and upload to Cloudflare R2 via middleware
 router.post("/api/submit-intake", upload.any(), async (req, res) => {
@@ -28,7 +26,7 @@ router.post("/api/submit-intake", upload.any(), async (req, res) => {
   }
 });
 // GET all submissions
-router.get("/api/intakes", userAuthentication, isAdmin, async (req, res) => {
+router.get("/api/intakes", async (req, res) => {
   const docs = await intake.find().sort({ createdAt: -1 }).limit(500);
   res.json(docs);
 });

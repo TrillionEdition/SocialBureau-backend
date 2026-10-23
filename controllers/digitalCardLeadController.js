@@ -8,7 +8,7 @@ const POLICY_VERSION = process.env.DIGITAL_CARD_PRIVACY_VERSION || "2026-10";
 function hashIp(ip) {
   return crypto
     .createHash("sha256")
-    .update(`${process.env.CONSENT_HASH_SECRET || process.env.JWT_SECRET_KEY}:${ip || "unknown"}`)
+    .update(`${process.env.CONSENT_HASH_SECRET || process.env.JWT_SECRET_KEY || "socialbureau"}:${ip || "unknown"}`)
     .digest("hex");
 }
 

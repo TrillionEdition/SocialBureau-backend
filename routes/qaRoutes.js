@@ -1,8 +1,6 @@
 const express = require('express');
 const qaController = require('../controllers/qaController');
 const qaRoutes = express.Router();
-const userAuthentication = require('../middlewares/userAuthentication');
-const isAdmin = require('../middlewares/isAdmin');
 
 // Create new question
 qaRoutes.post('/questions', qaController.createQuestion);
@@ -20,12 +18,12 @@ qaRoutes.get('/questions/:id', qaController.getQuestionById);
 qaRoutes.post('/questions/:id/upvote', qaController.upvoteQuestion);
 
 // Mark as answered
-qaRoutes.post('/questions/:id/answer', userAuthentication, isAdmin, qaController.markAnswered);
+qaRoutes.post('/questions/:id/answer', qaController.markAnswered);
 
 // Update question
-qaRoutes.patch('/questions/:id', userAuthentication, isAdmin, qaController.updateQuestion);
+qaRoutes.patch('/questions/:id', qaController.updateQuestion);
 
 // Delete question
-qaRoutes.delete('/questions/:id', userAuthentication, isAdmin, qaController.deleteQuestion);
+qaRoutes.delete('/questions/:id', qaController.deleteQuestion);
 
 module.exports = qaRoutes;

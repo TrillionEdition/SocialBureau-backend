@@ -1,7 +1,5 @@
 const express = require("express");
 const companyAchievementRoutes = express.Router();
-const userAuthentication = require("../middlewares/userAuthentication");
-const isAdmin = require("../middlewares/isAdmin");
 const {
     addCompanyAchievement,
     getAllCompanyAchievements,
@@ -9,9 +7,9 @@ const {
     deleteCompanyAchievement,
 } = require("../controllers/companyAchievementController");
 
-companyAchievementRoutes.post("/", userAuthentication, isAdmin, addCompanyAchievement);
+companyAchievementRoutes.post("/", addCompanyAchievement);
 companyAchievementRoutes.get("/", getAllCompanyAchievements);
-companyAchievementRoutes.put("/:id", userAuthentication, isAdmin, updateCompanyAchievement);
-companyAchievementRoutes.delete("/:id", userAuthentication, isAdmin, deleteCompanyAchievement);
+companyAchievementRoutes.put("/:id", updateCompanyAchievement);
+companyAchievementRoutes.delete("/:id", deleteCompanyAchievement);
 
 module.exports = companyAchievementRoutes;

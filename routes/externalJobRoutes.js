@@ -1,8 +1,6 @@
 const express = require('express');
 const externalJobRoutes = express.Router();
 const ExternalJob = require('../models/ExternalJob');
-const userAuthentication = require('../middlewares/userAuthentication');
-const isAdmin = require('../middlewares/isAdmin');
 
 // GET all active external jobs
 externalJobRoutes.get('/', async (req, res) => {
@@ -26,7 +24,7 @@ externalJobRoutes.get('/:id', async (req, res) => {
 });
 
 // POST - add new external job (admin/employer)
-externalJobRoutes.post('/', userAuthentication, isAdmin, async (req, res) => {
+externalJobRoutes.post('/', async (req, res) => {
     try {
         const job = new ExternalJob(req.body);
         await job.save();
@@ -37,7 +35,7 @@ externalJobRoutes.post('/', userAuthentication, isAdmin, async (req, res) => {
 });
 
 // PUT - update external job
-externalJobRoutes.put('/:id', userAuthentication, isAdmin, async (req, res) => {
+externalJobRoutes.put('/:id', async (req, res) => {
     try {
         const job = await ExternalJob.findByIdAndUpdate(req.params.id, req.body, { new: true });
         res.json(job);
@@ -47,7 +45,7 @@ externalJobRoutes.put('/:id', userAuthentication, isAdmin, async (req, res) => {
 });
 
 // DELETE - remove external job
-externalJobRoutes.delete('/:id', userAuthentication, isAdmin, async (req, res) => {
+externalJobRoutes.delete('/:id', async (req, res) => {
     try {
         await ExternalJob.findByIdAndDelete(req.params.id);
         res.json({ message: 'Deleted' });

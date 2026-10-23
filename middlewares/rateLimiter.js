@@ -1,5 +1,4 @@
-const { rateLimit, MemoryStore, ipKeyGenerator } = require("express-rate-limit");
-const crypto = require("crypto");
+const { rateLimit, MemoryStore } = require("express-rate-limit");
 const { redisClient, isConnected } = require("../database/Redisconfig");
 
 // Store backed by the app's existing Redis client so limits stay consistent
@@ -76,30 +75,6 @@ const loginLimiter = rateLimit({
   message: { error: "Too many login attempts, please try again later." },
 });
 
-const passwordResetLimiter = rateLimit({
-  store: new RedisRateLimitStore("rl:password-reset:"),
-  windowMs: 15 * 60 * 1000,
-  limit: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many password reset requests. Please try again later." },
-});
-
-const otpVerificationLimiter = rateLimit({
-  store: new RedisRateLimitStore("rl:otp-email:"),
-  windowMs: 15 * 60 * 1000,
-  limit: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
-    return email
-      ? crypto.createHash("sha256").update(email).digest("hex")
-      : ipKeyGenerator(req.ip);
-  },
-  message: { error: "Too many verification attempts. Please try again later." },
-});
-
 const clickupMemberLimiter = rateLimit({
   store: new RedisRateLimitStore("rl:clickup-member:"),
   windowMs: 5 * 60 * 1000,
@@ -109,31 +84,4 @@ const clickupMemberLimiter = rateLimit({
   message: { error: "Too many member data requests, please try again later." },
 });
 
-const aiLimiter = rateLimit({
-  store: new RedisRateLimitStore("rl:ai:"),
-  windowMs: 15 * 60 * 1000,
-  limit: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many AI requests. Please try again later." },
-});
-
-const pdfLimiter = rateLimit({
-  store: new RedisRateLimitStore("rl:pdf:"),
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many PDF conversion requests. Please try again later." },
-});
-
-module.exports = {
-  apiLimiter,
-  loginLimiter,
-  passwordResetLimiter,
-  otpVerificationLimiter,
-  clickupMemberLimiter,
-  aiLimiter,
-  pdfLimiter,
-  RedisRateLimitStore,
-};
+module.exports = { apiLimiter, loginLimiter, clickupMemberLimiter, RedisRateLimitStore };

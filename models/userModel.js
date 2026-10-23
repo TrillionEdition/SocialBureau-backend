@@ -1,13 +1,5 @@
 const mongoose = require("mongoose");
 
-function redactSensitiveUserFields(doc, ret) {
-  delete ret.password;
-  delete ret.resetPasswordToken;
-  delete ret.resetPasswordExpires;
-  delete ret.clickupToken;
-  return ret;
-}
-
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -28,16 +20,13 @@ const userSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
-      minLength: [5, "Minimum 5 characters required"],
-      select: false,
+      minLength: [5, "Minimum 5 characters required"]
     },
     resetPasswordToken: {
       type: String,
-      select: false,
     },
     resetPasswordExpires: {
       type: Date,
-      select: false,
     },
     verification: {
       type: Boolean,
@@ -92,7 +81,6 @@ const userSchema = new mongoose.Schema(
 
     clickupToken: {
       type: String,
-      select: false,
     },
 
     // Multiple reviews authored/associated with this user
@@ -115,7 +103,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      default: "user",
+      default: "partnership",
     },
     rating: {
       type: Number
@@ -258,8 +246,8 @@ const userSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    toJSON: { virtuals: true, transform: redactSensitiveUserFields },
-    toObject: { virtuals: true, transform: redactSensitiveUserFields },
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
 

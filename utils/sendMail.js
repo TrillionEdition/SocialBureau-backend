@@ -53,7 +53,7 @@ const createTransporter = () => {
 const transporter = createTransporter();
 
 const sendMail = async ({ to, subject, html }) => {
-  console.log("\n[MAILER] Starting dispatch sequence");
+  console.log(`\n📤 [MAILER] Starting dispatch sequence for: ${to}`);
 
   const mailOptions = {
     from: `"SocialBureau" <${process.env.BREVO_FROM_EMAIL || process.env.SENDGRID_FROM_EMAIL || process.env.MAIL_USER}>`,
@@ -67,13 +67,14 @@ const sendMail = async ({ to, subject, html }) => {
     console.log("✅ [MAILER] Success! Message ID:", info.messageId);
     return info;
   } catch (err) {
-    console.error("Email dispatch failed", { name: err.name, code: err.code });
+    console.error("❌ [MAILER] Email Dispatch Failed.");
+    console.error(`Error: ${err.message}`);
 
     if (process.env.NODE_ENV !== "production") {
       console.log("🛠️  [DEV FALLBACK] Proceeding as success for local development.\n");
       return { messageId: "dev-fallback-" + Date.now(), response: "250 OK (Mocked)" };
     }
-    throw new Error("Email delivery failed. Check the configured SMTP provider credentials and network access.");
+    throw new Error(`Email delivery failed: ${err.message}. Check the configured SMTP provider credentials and network access.`);
   }
 };
 

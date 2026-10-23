@@ -3,7 +3,6 @@ const Blog = require('../models/blogModel');
 const BlogRedirect = require('../models/BlogRedirect');
 const generateSitemaps = require('../scripts/generateSitemaps');
 const expressAsyncHandler = require('express-async-handler');
-const { sanitizeBlogContent, sanitizeBlogRecord } = require('../utils/sanitizeBlogContent');
 const {
   addComment,
   removeComment,
@@ -44,7 +43,6 @@ const blogController = {
       if (!contentArray || !Array.isArray(contentArray)) {
         return sendError(res, 400, 'Content is required and must be an array');
       }
-      contentArray = sanitizeBlogContent(contentArray);
 
       // Process uploaded section images
       const files = req.files || {};
@@ -146,7 +144,7 @@ const blogController = {
 
       // regenerate sitemaps in background
       generateSitemaps().catch(err => console.error('sitemap generation failed after create:', err));
-      return res.status(201).json({ success: true, data: sanitizeBlogRecord(saved) });
+      return res.status(201).json({ success: true, data: saved });
     } catch (err) {
       console.error('createBlog error', err);
       if (err.name === 'ValidationError') {
@@ -165,10 +163,6 @@ const blogController = {
   getBlogs: expressAsyncHandler(async (req, res) => {
     try {
       const { category, limit = 10, published } = req.query;
-      const isAdminUser = req.user?.role?.toLowerCase() === 'admin';
-      if ((published === 'all' || published === 'false') && !isAdminUser) {
-        return sendError(res, 403, 'Only admins may view unpublished blogs');
-      }
 
       let query = {};
       if (published === 'all') {
@@ -184,23 +178,21 @@ const blogController = {
       }
 
       // Redis caching
-      const pageLimit = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
-      const cacheKey = `blogs:list:${JSON.stringify(query)}:${pageLimit}`;
+      const cacheKey = `blogs:list:${JSON.stringify(query)}:${limit}`;
       const cachedData = await getCache(cacheKey);
       if (cachedData) {
-        return res.json({ success: true, data: cachedData.map(sanitizeBlogRecord) });
+        return res.json({ success: true, data: cachedData });
       }
 
       const blogs = await Blog.find(query)
         .sort('-createdAt')
-        .limit(pageLimit)
+        .limit(parseInt(limit))
         .lean();
 
       // Cache the result
-      const safeBlogs = blogs.map(sanitizeBlogRecord);
-      await setCache(cacheKey, safeBlogs, CACHE_EXPIRY.BLOGS_LIST);
+      await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
 
-      return res.json({ success: true, data: safeBlogs });
+      return res.json({ success: true, data: blogs });
     } catch (err) {
       console.error('❌ getBlogs error:', err);
       console.error('Error stack:', err.stack);
@@ -265,10 +257,7 @@ const blogController = {
       const cacheKey = `blog:${normalizedSlug}`;
       const cachedData = await getCache(cacheKey);
       if (cachedData) {
-        if (!cachedData.published && req.user?.role?.toLowerCase() !== 'admin') {
-          return sendError(res, 404, 'Blog not found');
-        }
-        return res.json({ success: true, data: sanitizeBlogRecord(cachedData) });
+        return res.json({ success: true, data: cachedData });
       }
 
       let blog = await Blog.findOne({ slug: normalizedSlug })
@@ -295,11 +284,8 @@ const blogController = {
         console.log('❌ Blog not found for slug:', normalizedSlug);
         return sendError(res, 404, 'Blog not found');
       }
-      if (!blog.published && req.user?.role?.toLowerCase() !== 'admin') {
-        return sendError(res, 404, 'Blog not found');
-      }
 
-      blog = sanitizeBlogRecord(blog);
+      console.log('✅ Blog found:', blog.title);
       await setCache(cacheKey, blog, CACHE_EXPIRY.SINGLE_BLOG);
 
       return res.json({ success: true, data: blog });
@@ -319,7 +305,7 @@ const blogController = {
       const cacheKey = `blogs:latest:${l}`;
       const cachedData = await getCache(cacheKey);
       if (cachedData) {
-        return res.json({ success: true, data: cachedData.map(sanitizeBlogRecord) });
+        return res.json({ success: true, data: cachedData });
       }
 
       const blogs = await Blog.find({ published: true })
@@ -327,10 +313,9 @@ const blogController = {
         .limit(l)
         .lean();
 
-      const safeBlogs = blogs.map(sanitizeBlogRecord);
-      await setCache(cacheKey, safeBlogs, CACHE_EXPIRY.BLOGS_LIST);
+      await setCache(cacheKey, blogs, CACHE_EXPIRY.BLOGS_LIST);
 
-      return res.json({ success: true, data: safeBlogs });
+      return res.json({ success: true, data: blogs });
     } catch (err) {
       console.error('getLatestBlogs error', err);
       return sendError(res, 500, 'Internal server error', err.message);
@@ -372,7 +357,6 @@ const blogController = {
       if (content) {
         try {
           updates.content = typeof content === 'string' ? JSON.parse(content) : content;
-          if (!Array.isArray(updates.content)) return sendError(res, 400, 'Content must be an array');
         } catch (e) {
           return sendError(res, 400, 'Invalid content format');
         }
@@ -431,7 +415,6 @@ const blogController = {
           }
           return section;
         }));
-        updates.content = sanitizeBlogContent(updates.content);
       }
 
       // Validate word count
@@ -492,7 +475,7 @@ const blogController = {
       }
 
       generateSitemaps().catch(err => console.error('sitemap generation failed after update:', err));
-      return res.json({ success: true, data: sanitizeBlogRecord(updated) });
+      return res.json({ success: true, data: updated });
     } catch (err) {
       console.error('updateBlog error', err);
       return sendError(res, 500, 'Internal server error', err.message);

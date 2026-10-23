@@ -22,7 +22,7 @@ const r2 = new S3Client({
 const jobApplicationController = {
     // APPLY TO JOB (Updated for R2 and Internal Form)
     applyToJob: async (req, res) => {
-    const { jobId, candidateName, candidateEmail, candidatePhone, coverLetter } = req.body;
+    const { jobId, candidateName, candidateEmail, candidatePhone, coverLetter, userId } = req.body;
     const resumeFile = req.file;
     try {
         if (!mongoose.Types.ObjectId.isValid(jobId)) {
@@ -72,7 +72,7 @@ const jobApplicationController = {
         const application = new JobApplication({
             jobId,
             jobModel,
-            userId: req.user?.id || null,
+            userId: userId || null,
             candidateName,
             candidateEmail,
             candidatePhone,
@@ -111,9 +111,9 @@ const jobApplicationController = {
 
     // SAVE JOB
     saveJob: async (req, res) => {
-        const { jobId } = req.body;
+        const { userId, jobId } = req.body;
         try {
-            const user = await User.findById(req.user.id);
+            const user = await User.findById(userId);
             if (!user) return res.status(404).json({ message: "User not found" });
 
             if (user.savedJobs.includes(jobId)) {
@@ -130,9 +130,9 @@ const jobApplicationController = {
 
     // UNSAVE JOB
     unsaveJob: async (req, res) => {
-        const { jobId } = req.body;
+        const { userId, jobId } = req.body;
         try {
-            const user = await User.findById(req.user.id);
+            const user = await User.findById(userId);
             if (!user) return res.status(404).json({ message: "User not found" });
 
             user.savedJobs = user.savedJobs.filter(id => id.toString() !== jobId);
@@ -146,9 +146,6 @@ const jobApplicationController = {
     // GET USER APPLICATIONS
     getUserApplications: async (req, res) => {
         const { userId } = req.params;
-        if (String(userId) !== String(req.user.id)) {
-            return res.status(403).json({ message: "You may only view your own applications" });
-        }
         try {
             const applications = await JobApplication.find({ userId }).populate('jobId');
             res.json(applications);
@@ -160,9 +157,6 @@ const jobApplicationController = {
     // GET USER SAVED JOBS
     getSavedJobs: async (req, res) => {
         const { userId } = req.params;
-        if (String(userId) !== String(req.user.id)) {
-            return res.status(403).json({ message: "You may only view your own saved jobs" });
-        }
         try {
             const user = await User.findById(userId).populate('savedJobs');
             if (!user) return res.status(404).json({ message: "User not found" });
@@ -210,13 +204,13 @@ const jobApplicationController = {
     // ADD MESSAGE TO APPLICATION
     addMessage: async (req, res) => {
         const { applicationId } = req.params;
-        const { message } = req.body;
+        const { senderId, message } = req.body;
         try {
             const application = await JobApplication.findById(applicationId);
             if (!application) return res.status(404).json({ message: "Application not found" });
 
             application.messages.push({
-                senderId: req.user.id,
+                senderId,
                 message,
                 timestamp: new Date()
             });
@@ -252,10 +246,10 @@ const jobApplicationController = {
 
     // GET USER CONVERSATIONS
     getUserConversations: async (req, res) => {
-        const userId = req.user.id;
+        const { userId } = req.params;
         try {
             const apps = await JobApplication.find({ 
-                $or: [{ userId }, { candidateEmail: req.user.email }]
+                $or: [{ userId }, { candidateEmail: req.query.email }] 
             }).populate('jobId');
             res.json(apps);
         } catch (error) {

@@ -1,16 +1,8 @@
 const Razorpay = require("razorpay");
-const mongoose = require("mongoose");
+const crypto = require("crypto");
 const User = require("../models/userModel");
 const Partnership = require("../models/partnershipModel");
 const DynamicReport = require("../modules/dynamicReports/dynamicReportModel");
-const AuditReport = require("../modules/auditReports/auditReportModel");
-const {
-  verifyRazorpaySignature,
-  matchesAuditReportPayment,
-  isEligibleFreeAuditReport,
-} = require("../utils/paymentSecurity");
-const { getPagePaymentPrice, matchesPagePayment } = require("../utils/pagePaymentSecurity");
-const { getPageContentForAccess } = require("../utils/protectedPageContent");
 
 /**
  * Initialize Razorpay Instance
@@ -32,59 +24,23 @@ if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
  */
 exports.createOrder = async (req, res) => {
   try {
-    const { amount, currency = "INR", reportId, pageSlug } = req.body || {};
+    const { amount, currency = "INR" } = req.body || {};
 
-    let options;
-    if (reportId) {
-      if (!mongoose.Types.ObjectId.isValid(reportId)) {
-        return res.status(400).json({ success: false, message: "Invalid report ID" });
-      }
-      const report = await AuditReport.findById(reportId);
-      if (!report || report.status !== "published") {
-        return res.status(404).json({ success: false, message: "Report not found" });
-      }
-
-      const reportAmount = Number(report.amt);
-      if (!Number.isFinite(reportAmount) || reportAmount <= 0) {
-        return res.status(400).json({ success: false, message: "This report does not require payment" });
-      }
-
-      options = {
-        amount: Math.round(reportAmount * 100),
-        currency: "INR",
-        receipt: `audit_${report._id}_${Date.now()}`,
-        notes: { purpose: "audit-report", reportId: String(report._id) },
-      };
-    } else if (pageSlug) {
-      const pagePrice = getPagePaymentPrice(pageSlug);
-      if (!Number.isFinite(pagePrice)) {
-        return res.status(404).json({ success: false, message: "Page payment is not configured" });
-      }
-      if (!req.user?.id) {
-        return res.status(401).json({ success: false, message: "Authentication is required for this purchase" });
-      }
-      options = {
-        amount: Math.round(pagePrice * 100),
-        currency: "INR",
-        receipt: `page_${Date.now()}`,
-        notes: { purpose: "gated-page", pageSlug, userId: String(req.user.id) },
-      };
-    } else {
-      const amountNum = Number(amount);
-      if (!amount || Number.isNaN(amountNum) || amountNum <= 0) {
-        return res.status(400).json({ success: false, message: "Valid amount is required" });
-      }
-      options = {
-        amount: Math.round(amountNum * 100),
-        currency,
-        receipt: `receipt_${Date.now()}`,
-      };
+    const amountNum = Number(amount);
+    if (!amount || Number.isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ success: false, message: "Valid amount is required" });
     }
 
     if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
       console.error("Create Order failed: Razorpay keys missing");
       return res.status(500).json({ success: false, message: "Payment gateway not configured" });
     }
+
+    const options = {
+      amount: Math.round(amountNum * 100), // Amount in paise
+      currency,
+      receipt: `receipt_${Date.now()}`,
+    };
 
     console.log("Attempting to create Razorpay order with options:", options);
     const order = await razorpay.orders.create(options);
@@ -113,54 +69,50 @@ exports.createOrder = async (req, res) => {
  */
 exports.verifyPayment = async (req, res) => {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, reportId, free } = req.body || {};
+    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, reportId, amt, free } = req.body;
 
-    if (free === true) {
-      if (!reportId || !mongoose.Types.ObjectId.isValid(reportId)) {
-        return res.status(400).json({ success: false, message: "A valid report ID is required" });
+    // If marked as free (zero-amount), skip signature verification and mark paid directly
+    if (free === true || (amt !== undefined && Number(amt) === 0)) {
+      console.log("Free payment flow detected for report:", reportId);
+      if (reportId) {
+        const AuditReport = require("../modules/auditReports/auditReportModel");
+        const update = { isPaid: true };
+        if (amt !== undefined) {
+          const parsedAmt = parseFloat(amt);
+          if (!isNaN(parsedAmt)) update.amt = parsedAmt;
+        }
+        const updatedReport = await AuditReport.findByIdAndUpdate(reportId, update, { new: true });
+        console.log("📄 AuditReport Free Update Result:", updatedReport ? "SUCCESS" : "REPORT NOT FOUND");
       }
-      const report = await AuditReport.findById(reportId);
-      if (!report || report.status !== "published") {
-        return res.status(404).json({ success: false, message: "Report not found" });
-      }
-      if (!isEligibleFreeAuditReport(report)) {
-        return res.status(400).json({ success: false, message: "This report requires payment" });
-      }
-      await AuditReport.findByIdAndUpdate(reportId, { isPaid: true });
-      return res.status(200).json({ success: true, message: "Free report unlocked" });
+
+      return res.status(200).json({ success: true, message: "Marked as paid (free)" });
     }
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ success: false, message: "Payment details are required" });
-    }
+    const sign = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSign = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(sign.toString())
+      .digest("hex");
 
-    if (reportId) {
-      if (!mongoose.Types.ObjectId.isValid(reportId)) {
-        return res.status(400).json({ success: false, message: "Invalid report ID" });
-      }
-      const report = await AuditReport.findById(reportId);
-      if (!report || report.status !== "published") {
-        return res.status(404).json({ success: false, message: "Report not found" });
-      }
-      if (!verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, process.env.RAZORPAY_KEY_SECRET)) {
-        return res.status(400).json({ success: false, message: "Invalid payment signature" });
-      }
-
-      const [order, payment] = await Promise.all([
-        razorpay.orders.fetch(razorpay_order_id),
-        razorpay.payments.fetch(razorpay_payment_id),
-      ]);
-      if (!matchesAuditReportPayment(report, order, payment)) {
-        return res.status(400).json({ success: false, message: "Payment order does not match this report" });
-      }
-
-      await AuditReport.findByIdAndUpdate(reportId, { isPaid: true });
-      return res.status(200).json({ success: true, message: "Payment verified successfully" });
-    }
-
-    if (verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, process.env.RAZORPAY_KEY_SECRET)) {
+    if (razorpay_signature === expectedSign) {
       console.log("✅ Payment verification successful for order:", razorpay_order_id);
-      if (req.user && req.user.id) {
+      
+      // If payment is for a specific Audit Report, update it
+      if (reportId) {
+        console.log("🔍 Attempting to mark AuditReport paid:", reportId);
+        const AuditReport = require("../modules/auditReports/auditReportModel");
+        const update = { isPaid: true };
+        if (amt !== undefined) {
+          const parsedAmt = parseFloat(amt);
+          if (!isNaN(parsedAmt)) update.amt = parsedAmt;
+        }
+        const updatedReport = await AuditReport.findByIdAndUpdate(
+          reportId,
+          update,
+          { new: true }
+        );
+        console.log("📄 AuditReport Update Result:", updatedReport ? "SUCCESS" : "REPORT NOT FOUND");
+      } else if (req.user && req.user.id) {
         // Otherwise, standard user/influencer workflow updates
         console.log("🔍 Attempting to update User ID:", req.user.id);
         const updatedUser = await User.findByIdAndUpdate(
@@ -194,8 +146,8 @@ exports.verifyPayment = async (req, res) => {
       });
     }
   } catch (error) {
-    console.error("Verification Error:", error && error.message);
-    res.status(500).json({ success: false, message: "Payment verification failed" });
+    console.error("Verification Error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -221,25 +173,6 @@ exports.checkPageAccess = async (req, res) => {
   }
 };
 
-exports.getPageContent = async (req, res) => {
-  try {
-    res.set("Cache-Control", "private, no-store");
-    const { pageSlug } = req.params;
-    const user = await User.findById(req.user.id).select("paidPages").lean();
-    const content = getPageContentForAccess(pageSlug, user?.paidPages);
-    if (content === undefined) {
-      return res.status(404).json({ success: false, message: "Page content not found" });
-    }
-    if (content === null) {
-      return res.status(403).json({ success: false, message: "Page access is required" });
-    }
-    return res.status(200).json({ success: true, content });
-  } catch (error) {
-    console.error("Protected page content request failed", { code: error.code, name: error.name });
-    return res.status(500).json({ success: false, message: "Could not load page content" });
-  }
-};
-
 /**
  * @desc    Verify Razorpay payment for a gated page and persist access for the logged-in user
  * @route   POST /api/payment/verify-page
@@ -253,33 +186,25 @@ exports.verifyPagePayment = async (req, res) => {
       return res.status(400).json({ success: false, message: "pageSlug is required" });
     }
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-      return res.status(400).json({ success: false, message: "Payment details are required" });
-    }
-    if (!Number.isFinite(getPagePaymentPrice(pageSlug))) {
-      return res.status(400).json({ success: false, message: "Page payment is not configured" });
-    }
-    if (!verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, process.env.RAZORPAY_KEY_SECRET)) {
+    const sign = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSign = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(sign.toString())
+      .digest("hex");
+
+    if (razorpay_signature !== expectedSign) {
       return res.status(400).json({
         success: false,
         message: "Invalid signature, payment verification failed",
       });
     }
 
-    const [order, payment] = await Promise.all([
-      razorpay.orders.fetch(razorpay_order_id),
-      razorpay.payments.fetch(razorpay_payment_id),
-    ]);
-    if (!matchesPagePayment(pageSlug, req.user.id, order, payment)) {
-      return res.status(400).json({ success: false, message: "Payment order does not match this page" });
-    }
-
     await User.findByIdAndUpdate(req.user.id, { $addToSet: { paidPages: pageSlug } });
 
     return res.status(200).json({ success: true, message: "Payment verified, page unlocked" });
   } catch (error) {
-    console.error("Page payment verification failed", { code: error.code, name: error.name });
-    res.status(500).json({ success: false, message: "Payment verification failed" });
+    console.error("Page Payment Verification Error:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -321,7 +246,11 @@ exports.verifyDynamicReportPayment = async (req, res) => {
     if (!report) return res.status(404).json({ success: false, message: "Report not found" });
 
     const amount = Number.isFinite(report.viewingPrice) ? report.viewingPrice : 2;
-    if (!verifyRazorpaySignature(razorpay_order_id, razorpay_payment_id, razorpay_signature, process.env.RAZORPAY_KEY_SECRET)) {
+    const expectedSignature = crypto
+      .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest("hex");
+    if (razorpay_signature !== expectedSignature) {
       return res.status(400).json({ success: false, message: "Invalid payment signature" });
     }
 

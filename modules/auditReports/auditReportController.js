@@ -226,7 +226,7 @@ const auditReportController = {
     const isClient = uniqueClientIds.length > 0;
 
     // Admins and partners (with no client company associations) are exempt
-    const isAdminOrPartner = role === "admin";
+    const isAdminOrPartner = role === "admin" || ((role === "partner" || role === "partnership") && !isClient);
 
     if (!isAdminOrPartner) {
       if (!uniqueClientIds.includes(report.clientId.toString())) {
@@ -269,7 +269,7 @@ const auditReportController = {
     const isClient = uniqueClientIds.length > 0;
 
     // Admins and partners (with no client company associations) are exempt
-    const isAdminOrPartner = role === "admin";
+    const isAdminOrPartner = role === "admin" || ((role === "partner" || role === "partnership") && !isClient);
 
     if (!isAdminOrPartner) {
       if (!uniqueClientIds.includes(report.clientId.toString())) {

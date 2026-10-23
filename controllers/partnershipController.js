@@ -1,11 +1,12 @@
 const Partnership = require("../models/partnershipModel");
 const Meeting = require("../models/meetingModel");
 const asyncHandler = require("express-async-handler");
+const fs = require("fs");
+const path = require("path");
 const sendMail = require("../utils/sendMail_disabled");
 const googleService = require("../services/googleService");
 const User = require("../models/userModel");
 const mongoose = require("mongoose");
-const resolvePartnershipEntitlements = require("../utils/partnershipEntitlements");
 
 
 const partnershipController = {
@@ -91,7 +92,7 @@ const partnershipController = {
         try {
           const token = authHeader.split(" ")[1];
           const jwt = require("jsonwebtoken");
-          const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY);
+          const decoded = jwt.verify(token, process.env.JWT_SECRET_KEY || "SocialBureau");
           const user = await User.findById(decoded.id);
           if (user && (user.role === "admin" || user._id.toString() === partner.user?.toString())) {
             hasAccess = true;
@@ -417,7 +418,9 @@ const partnershipController = {
         user: { $exists: false }
       });
 
-      const entitlements = resolvePartnershipEntitlements(req.user?.role, partner, req.body);
+      const logMsg = `[${new Date().toISOString()}] OWNER_SAVE: User=${userId}, Name=${name}, Details=${!!details}\n`;
+      fs.appendFileSync("save_debug.log", logMsg);
+      console.log(logMsg);
       
       const updateData = {
         name,
@@ -430,7 +433,8 @@ const partnershipController = {
         subtitle,
         details: details || (partner ? partner.details : {}),
         templateId: templateId || (partner ? partner.templateId : "template1"),
-        ...entitlements,
+        isFree: req.body.isFree || false,
+        hasPaid: req.body.hasPaid || (partner ? partner.hasPaid : false),
         isVisible: req.user?.role === "admin" && isVisible !== undefined 
           ? isVisible 
           : (partner ? partner.isVisible : false),
